@@ -1,0 +1,186 @@
+"""Async query() generator — the explicit while-loop modeled on
+``claude-code/query.ts:241-394``.
+
+Mapping (claude-code → here):
+  - ``while(true) { ... }``                    → ``for turn in range(1, max_turns+1)``
+  - per-iteration ``call_model``               → ``model.bind_tools(tools).astream(messages)``
+  - ``stop_reason == "tool_use"`` branch       → ``if assistant_msg.tool_calls:``
+  - ``stop_reason == "end_turn"`` branch       → ``else: yield Done(completed)``
+  - tool_result content blocks                 → ``ToolMessage(...)`` accumulation
+  - ``abortController.signal.aborted``         → ``asyncio.Event`` poll
+
+We stay on LangChain ``BaseMessage`` types end-to-end so
+``ChatAnthropicVertex`` and ``BaseTool`` plug in with no shimming.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from typing import TYPE_CHECKING, Any
+
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+
+from .types import (
+    Done,
+    StreamEvent,
+    Terminal,
+    TextDelta,
+    ToolEnd,
+    ToolStart,
+    TurnStart,
+    coerce_text,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.tools import BaseTool
+
+
+DEFAULT_MAX_TURNS = 25
+
+
+async def query(
+    *,
+    messages: Sequence[BaseMessage],
+    system_prompt: str,
+    tools: list["BaseTool"],
+    model: "BaseChatModel",
+    max_turns: int = DEFAULT_MAX_TURNS,
+    abort: asyncio.Event | None = None,
+) -> AsyncIterator[StreamEvent]:
+    """Run the LLM↔Tool loop until end_turn, max_turns, or abort.
+
+    Args:
+        messages: initial conversation (typically ``[HumanMessage(prompt)]``).
+            A ``SystemMessage`` is prepended automatically.
+        system_prompt: system text. Goes in front of ``messages``.
+        tools: LangChain ``BaseTool`` list. Bound to the model each turn.
+        model: a ``BaseChatModel`` supporting ``bind_tools`` + ``astream``.
+        max_turns: hard upper bound on iterations (claude-code's turnCount cap).
+        abort: optional asyncio Event; checked at the top of every turn.
+
+    Yields:
+        ``StreamEvent``s in order: TurnStart → TextDelta* → ToolStart/ToolEnd*
+        → ... → Done. ``Done`` is always the last event.
+    """
+    state: list[BaseMessage] = [SystemMessage(content=system_prompt), *messages]
+    model_with_tools = model.bind_tools(tools) if tools else model
+    tools_by_name = {t.name: t for t in tools}
+
+    for turn in range(1, max_turns + 1):
+        if abort is not None and abort.is_set():
+            yield Done(Terminal("aborted"))
+            return
+
+        yield TurnStart(turn)
+
+        # 1. Stream the assistant turn — accumulate chunks via __add__ fold.
+        accumulated: AIMessageChunk | None = None
+        try:
+            async for chunk in model_with_tools.astream(state):
+                if not isinstance(chunk, AIMessageChunk):
+                    # Some adapters yield a final AIMessage as the last chunk;
+                    # cast to chunk so the fold stays homogeneous.
+                    chunk = AIMessageChunk(  # type: ignore[assignment]
+                        content=getattr(chunk, "content", ""),
+                        additional_kwargs=getattr(chunk, "additional_kwargs", {}),
+                    )
+                accumulated = chunk if accumulated is None else accumulated + chunk
+                delta = coerce_text(chunk.content)
+                if delta:
+                    yield TextDelta(delta)
+        except Exception as e:  # noqa: BLE001 — surface any model error to caller
+            yield Done(Terminal("error", error=f"{type(e).__name__}: {e}"))
+            return
+
+        if accumulated is None:
+            yield Done(Terminal("error", error="model produced no chunks"))
+            return
+
+        assistant_msg = AIMessage(
+            content=accumulated.content,
+            tool_calls=list(accumulated.tool_calls or []),
+            additional_kwargs=dict(accumulated.additional_kwargs or {}),
+            response_metadata=dict(accumulated.response_metadata or {}),
+        )
+        state.append(assistant_msg)
+
+        # 2. stop_reason branch.
+        if not assistant_msg.tool_calls:
+            yield Done(Terminal("completed", final_text=coerce_text(assistant_msg.content)))
+            return
+
+        # 3. Execute each tool_use → append ToolMessage(s).
+        for tc in assistant_msg.tool_calls:
+            tc_id = tc.get("id") or ""
+            tc_name = tc.get("name") or ""
+            tc_args = tc.get("args") or {}
+            yield ToolStart(tc_id, tc_name, dict(tc_args))
+
+            tool = tools_by_name.get(tc_name)
+            if tool is None:
+                err = f"unknown tool: {tc_name!r}"
+                state.append(
+                    ToolMessage(content=err, tool_call_id=tc_id, status="error")
+                )
+                yield ToolEnd(tc_id, err, True)
+                continue
+
+            try:
+                output = await tool.ainvoke(tc_args)
+                state.append(
+                    ToolMessage(
+                        content=_stringify_tool_output(output),
+                        tool_call_id=tc_id,
+                    )
+                )
+                yield ToolEnd(tc_id, output, False)
+            except Exception as e:  # noqa: BLE001 — feed error back to the model
+                err = f"{type(e).__name__}: {e}"
+                state.append(
+                    ToolMessage(content=err, tool_call_id=tc_id, status="error")
+                )
+                yield ToolEnd(tc_id, err, True)
+        # 4. continue → next iteration calls the model with the appended results.
+
+    yield Done(Terminal("max_turns"))
+
+
+def _stringify_tool_output(output: Any) -> str:
+    """Tools wrapped with @tool already return strings. Be defensive for
+    callers that hand back BaseModel/dict/list — Anthropic's tool_result
+    content must be a string (or list of blocks; we keep it simple)."""
+    if isinstance(output, str):
+        return output
+    if hasattr(output, "model_dump_json"):  # pydantic v2
+        try:
+            return output.model_dump_json()
+        except Exception:  # noqa: BLE001
+            pass
+    if hasattr(output, "json"):  # pydantic v1 fallback
+        try:
+            return output.json()
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        import json
+
+        return json.dumps(output, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        return repr(output)
+
+
+def initial_messages(prompt: str) -> list[BaseMessage]:
+    """Convenience: wrap a single user prompt in the LangChain message list."""
+    return [HumanMessage(content=prompt)]
+
+
+__all__ = ["DEFAULT_MAX_TURNS", "initial_messages", "query"]

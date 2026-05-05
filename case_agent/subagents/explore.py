@@ -1,0 +1,60 @@
+"""Explore sub-agent: case-document scout running on Gemini Flash.
+
+Single low-level capability: rip through wiki/cache/json/sources via smart_search
+and read_with_anchor, return citation-rich JSON. No write/edit. No analysis.
+Lives in an isolated context so the main (Sonnet) agent's window stays clean.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from deepagents import FilesystemPermission, SubAgent
+
+from ..prompts import EXPLORE_SYSTEM_PROMPT
+from ..tools.agent_tools import (
+    build_read_with_anchor_tool,
+    build_smart_search_tool,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+
+    from ..tools.search import Embedder
+    from ..workspace import Workspace
+
+
+# Block all writes for the explore agent. Reads through the FilesystemBackend
+# are still possible (and cheaper than going through smart_search), but the
+# main flow should always be smart_search-first.
+_EXPLORE_PERMISSIONS = [
+    FilesystemPermission(operations=["write", "edit"], paths=["/**"], mode="deny"),
+    FilesystemPermission(operations=["read", "ls", "glob", "grep"], paths=["/**"], mode="allow"),
+]
+
+
+def build_explore_subagent(
+    workspace: "Workspace",
+    embedder: "Embedder",
+    *,
+    model: "BaseChatModel | None" = None,
+) -> SubAgent:
+    tools: list[Any] = [
+        build_smart_search_tool(workspace, embedder),
+        build_read_with_anchor_tool(workspace),
+    ]
+    sa: SubAgent = {
+        "name": "explore",
+        "description": (
+            "Search and read case documents (wiki/cache/json/sources) and return "
+            "a citation-rich JSON summary. Use this when you need to gather "
+            "evidence excerpts without polluting your own context. The sub-agent "
+            "cannot write or edit files."
+        ),
+        "system_prompt": EXPLORE_SYSTEM_PROMPT,
+        "tools": tools,
+        "permissions": _EXPLORE_PERMISSIONS,
+    }
+    if model is not None:
+        sa["model"] = model
+    return sa
