@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from wiki_builder.config import wiki_settings
 from wiki_builder.llm import get_genai_client
+from wiki_builder.loader import CATEGORY_ORDER
 from wiki_builder.models import Registry
 from wiki_builder.observability import log_generation
 from wiki_builder.prompts import OVERVIEW_PROMPT
@@ -67,8 +68,7 @@ def _generate_index_md(
         by_category[sp.get("category", "기타")].append(sp)
 
     lines.append(f"## 소스 문서 ({len(source_pages)}개)")
-    cat_order = ["공소장", "수사보고서", "진술", "참조법문서", "기타"]
-    for cat in cat_order:
+    for cat in CATEGORY_ORDER:
         pages = by_category.get(cat, [])
         if not pages:
             continue
@@ -116,7 +116,7 @@ async def _generate_overview(
 
     # 카테고리별 요약 생성
     cat_summaries = []
-    for cat in ["공소장", "수사보고서", "진술", "참조법문서", "기타"]:
+    for cat in CATEGORY_ORDER:
         summaries = by_category.get(cat, [])
         if not summaries:
             continue

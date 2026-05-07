@@ -78,7 +78,7 @@ ENTITY_SYNTHESIS_PROMPT = """\
 
 ## 출력 규칙
 - 모든 사실은 RAW 안에서만 발췌 (외부 지식 금지, 추측 금지)
-- 각 사실 끝의 `(source-X:p1,p2)` citation 토큰을 보존
+- 각 사실 끝의 `(source-X)` citation 토큰을 보존
 - 시간순 또는 주제별로 자유롭게 정리
 - 마크다운 형식, 짧고 밀도 높게 (3~10문장)
 - 새 wikilink `[[...]]` 는 추가하지 마세요 (Phase 4 가 처리)
@@ -93,7 +93,7 @@ CONCEPT_SYNTHESIS_PROMPT = """\
 
 ## 출력 규칙
 - 모든 사실은 RAW 안에서만 발췌
-- 각 사실 끝의 `(source-X:p1,p2)` citation 토큰을 보존
+- 각 사실 끝의 `(source-X)` citation 토큰을 보존
 - 정의 → 사실관계 → 법적 쟁점 순서가 자연스러우면 그렇게 정리
 - 마크다운, 짧고 밀도 높게 (3~10문장)
 - 새 wikilink 추가 금지, 제목·sentinel 출력 금지"""

@@ -9,7 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# data
 data/
+logs/
 
 # Local env (use .env.example as the template)
 .env

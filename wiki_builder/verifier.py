@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from wiki_builder.models import CompileResult, SparkDocument
+from wiki_builder.models import CompileResult, Document
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +36,14 @@ class VerifyOutcome:
         return len(self.failures)
 
 
-def _page_text(doc: SparkDocument, page: int) -> str:
+def _page_text(doc: Document, page: int) -> str:
     for p in doc.content:
         if p.page == page:
             return p.text
     return ""
 
 
-def _pages_text(doc: SparkDocument, pages: list[int]) -> str:
+def _pages_text(doc: Document, pages: list[int]) -> str:
     if not pages:
         return doc.full_text
     return "\n".join(_page_text(doc, p) for p in pages)
@@ -82,7 +82,7 @@ def _verify_text_overlap(text: str, hay: str, min_ratio: float = 0.4) -> bool:
     return hits / len(tokens) >= min_ratio
 
 
-def verify_compile_result(result: CompileResult, doc: SparkDocument) -> VerifyOutcome:
+def verify_compile_result(result: CompileResult, doc: Document) -> VerifyOutcome:
     """compile result 의 모든 fact 를 검증해 실패 목록과 통계를 돌려준다."""
     outcome = VerifyOutcome()
     full = doc.full_text

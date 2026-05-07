@@ -9,10 +9,20 @@ from pathlib import Path
 
 import pytest
 
-from wiki_builder.alias_resolver import _normalize_groups, absorb_group
+from wiki_builder.alias_resolver import (
+    _clean_synth_prose,
+    _extract_description,
+    _format_items,
+    _normalize_groups,
+    absorb_group,
+)
 from wiki_builder.config import wiki_settings
-from wiki_builder.models import Registry
-from wiki_builder.wiki_store import append_managed_raw_subsection, write_entity_page
+from wiki_builder.models import Registry, RegistryEntry
+from wiki_builder.wiki_store import (
+    append_managed_raw_subsection,
+    set_managed_synthesis,
+    write_entity_page,
+)
 
 
 @pytest.fixture
@@ -128,3 +138,82 @@ def test_absorb_group_preserves_pages(case_dir: Path) -> None:
     assert sorted(pmap["100"]) == [1, 2]
     # 흡수된 200 의 초기 [1] 도 함께 union 됨
     assert sorted(pmap["200"]) == [1, 3, 4]
+
+
+def test_clean_synth_prose_strips_wikilinks_citations_headings() -> None:
+    raw = (
+        "## 종합\n\n"
+        "[[entities/entity-002.md|KT]]는 통신 기업이다(source-1, source-2). "
+        "[[entities/entity-001.md|윤경림]] 사장이 합류했다(source-3)."
+    )
+    out = _clean_synth_prose(raw)
+    assert "##" not in out
+    assert "[[" not in out and "]]" not in out
+    assert "source-" not in out
+    assert "KT" in out and "윤경림" in out
+
+
+def test_extract_description_reads_synthesis(case_dir: Path) -> None:
+    reg = Registry(prefix="entity")
+    entry_id = _registered_page(reg, "KT", "org", "1", "초기 사실")
+    entry = reg.entries[entry_id]
+    set_managed_synthesis(
+        entry,
+        (
+            "[[entities/entity-002.md|KT]]는 한국 통신 1위 사업자로, "
+            "유선·무선 사업을 운영한다(source-1)."
+        ),
+        is_concept=False,
+    )
+    desc = _extract_description(entry)
+    assert "KT" in desc
+    assert "통신" in desc
+    assert "(" not in desc and "[[" not in desc
+
+
+def test_extract_description_returns_empty_when_page_missing() -> None:
+    entry = RegistryEntry(
+        id="entity-999",
+        name_ko="없는엔티티",
+        type="org",
+        file="entities/entity-999.md",
+    )
+    assert _extract_description(entry) == ""
+
+
+def test_extract_description_truncates_long_prose(case_dir: Path) -> None:
+    reg = Registry(prefix="entity")
+    entry_id = _registered_page(reg, "Long", "org", "1", "초기")
+    entry = reg.entries[entry_id]
+    long_prose = ("기" * 300) + "."
+    set_managed_synthesis(entry, long_prose, is_concept=False)
+    desc = _extract_description(entry)
+    assert 0 < len(desc) <= 200
+
+
+def test_format_items_includes_description_lines() -> None:
+    reg = Registry(prefix="entity")
+    a = reg.register(name_ko="KT", type="org", source_id="1", pages=[1])
+    b = reg.register(name_ko="하나로통신", type="org", source_id="2", pages=[1])
+    descs = {a.id: "한국 1위 통신사", b.id: "1990년대 후반 별도 통신사"}
+    text = _format_items([a, b], descs)
+    assert f"- {a.id}: KT" in text
+    assert "    설명: 한국 1위 통신사" in text
+    assert "    설명: 1990년대 후반 별도 통신사" in text
+
+
+def test_format_items_omits_blank_descriptions() -> None:
+    reg = Registry(prefix="entity")
+    a = reg.register(name_ko="KT", type="org", source_id="1", pages=[1])
+    text = _format_items([a], {a.id: ""})
+    assert "설명:" not in text
+    assert f"- {a.id}: KT" in text
+
+
+def test_format_items_works_without_descriptions_arg() -> None:
+    reg = Registry(prefix="entity")
+    a = reg.register(name_ko="KT", type="org", source_id="1", pages=[1])
+    # backward-compat: descriptions 인자 없이도 기존 포맷 유지
+    text = _format_items([a])
+    assert "설명:" not in text
+    assert f"- {a.id}: KT (1개 문서)" in text

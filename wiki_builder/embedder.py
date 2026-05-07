@@ -113,12 +113,12 @@ def _load_existing(emb_dir: Path) -> tuple[dict | None, np.ndarray | None]:
         return None, None
 
 
-async def _embed_batches(texts: list[str]) -> np.ndarray:
+async def _embed_batches(texts: list[str], concurrency: int = _CONCURRENCY) -> np.ndarray:
     """배치 단위로 임베딩 (Semaphore 로 동시성 제한)."""
     if not texts:
         return np.zeros((0, wiki_settings.EMBEDDING_DIM), dtype=np.float32)
 
-    sem = asyncio.Semaphore(_CONCURRENCY)
+    sem = asyncio.Semaphore(concurrency)
     batches = [texts[i : i + _BATCH_SIZE] for i in range(0, len(texts), _BATCH_SIZE)]
 
     async def run_batch(idx: int, batch: list[str]) -> tuple[int, np.ndarray]:
@@ -136,7 +136,7 @@ async def _embed_batches(texts: list[str]) -> np.ndarray:
     return np.concatenate([r[1] for r in results], axis=0)
 
 
-async def run_phase7() -> dict[str, int]:
+async def run_phase7(concurrency: int = _CONCURRENCY) -> dict[str, int]:
     """Phase 7 entry point.
 
     Returns: ``{"total": N, "new": k, "updated": m, "unchanged": u}``
@@ -180,7 +180,7 @@ async def run_phase7() -> dict[str, int]:
     )
 
     # 새 임베딩
-    new_vectors = await _embed_batches([p["doc_text"] for p in to_embed])
+    new_vectors = await _embed_batches([p["doc_text"] for p in to_embed], concurrency)
 
     # 최종 vectors / index 합성 (pages 순서를 보존)
     embed_lookup: dict[str, np.ndarray] = {

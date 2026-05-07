@@ -15,9 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _citation(doc_id: str, pages: list[int]) -> str:
-    if not pages:
-        return f" (source-{doc_id})"
-    return f" (source-{doc_id}:" + ",".join(str(p) for p in pages) + ")"
+    return f" (source-{doc_id})"
 
 
 def _extract_entity_info(
@@ -101,7 +99,7 @@ async def process_one_document(
                 entry,
                 doc_id,
                 info_cache[entity.name_ko],
-                False,
+                is_concept=False,
             )
 
     return len(result.entities)

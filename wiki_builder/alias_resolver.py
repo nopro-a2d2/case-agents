@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Callable
 
 from google import genai
@@ -25,6 +26,7 @@ from wiki_builder.llm import get_genai_client
 from wiki_builder.models import Registry, RegistryEntry
 from wiki_builder.observability import log_generation
 from wiki_builder.wiki_store import (
+    _extract_synth,
     load_registry,
     merge_raw_subsections_from_body,
     read_page,
@@ -47,7 +49,16 @@ ALIAS_GROUP_PROMPT = """\
 - 직책+이름 같은 자연스러운 변형 ("윤 사장" + "윤경림") 은 같은 그룹.
 - 약칭/풀네임 ("KT" + "주식회사 KT") 은 같은 그룹.
 - **동명이인 가능성이 있으면 분리** (확신할 때만 묶기).
+- **인수/합병/지분관계라도 별도 법인이면 분리** ("KT" 와 "KT 가 인수한 하나로통신",
+  "현대자동차" 와 "현대모비스" 는 서로 다른 entity — 같은 그룹 금지).
+- 표기 유사도가 0 에 가까운 쌍 (이름이 거의 겹치지 않음) 은 사전지식이 아닌
+  본문 설명으로만 판단하고, 확신이 없으면 분리하세요.
 - 모든 입력 ID 가 정확히 한 그룹에 속해야 함 (1-element 그룹 포함).
+
+## 입력 형식
+각 항목은 `- {{id}}: {{이름}} ({{N}}개 문서)` 한 줄로 표기되며, 가능한 경우
+바로 다음 줄에 `    설명: ...` 형태로 요약 1~2문장이 붙습니다.
+설명이 있으면 같은 대상 판단의 **1순위 근거** 로 활용하세요.
 
 ## 입력
 {items}
@@ -58,12 +69,61 @@ JSON 배열, 각 그룹은 ID 문자열 배열.
 
 
 _BATCH_SIZE = 60
+_DESC_MAX_CHARS = 160
+
+_WIKILINK_RE = re.compile(r"\[\[[^\]|]*\|([^\]]+)\]\]|\[\[([^\]]+)\]\]")
+_CITATION_RE = re.compile(r"\(\s*source-[^)]*\)")
+_HEADING_RE = re.compile(r"^#+\s.*$", re.MULTILINE)
 
 
-def _format_items(entries: list[RegistryEntry]) -> str:
-    return "\n".join(
-        f"- {e.id}: {e.name_ko} ({len(e.source_ids)}개 문서)" for e in entries
-    )
+def _clean_synth_prose(text: str) -> str:
+    """SYNTHESIS prose 에서 wikilink 표시텍스트만 남기고 citation·헤더·여분 공백 제거."""
+    text = _HEADING_RE.sub("", text)
+    text = _WIKILINK_RE.sub(lambda m: m.group(1) or m.group(2) or "", text)
+    text = _CITATION_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_description(entry: RegistryEntry) -> str:
+    """entry 의 wiki 페이지 SYNTHESIS 첫 문장 1~2개 (~160자) 를 평문으로 반환.
+
+    페이지가 없거나 합성이 비어 있으면 빈 문자열. LLM 입력 보강 전용이므로
+    실패 시 silent fallback (정규화 자체를 막지 않음)."""
+    path = wiki_dir() / entry.file
+    if not path.exists():
+        return ""
+    try:
+        _, body = read_page(path)
+    except Exception:
+        return ""
+    synth = _extract_synth(body)
+    if not synth:
+        return ""
+    cleaned = _clean_synth_prose(synth)
+    if not cleaned:
+        return ""
+    if len(cleaned) <= _DESC_MAX_CHARS:
+        return cleaned
+    cut = cleaned[:_DESC_MAX_CHARS]
+    last_period = max(cut.rfind("."), cut.rfind("。"), cut.rfind("다 "))
+    if last_period >= 40:
+        return cut[: last_period + 1].strip()
+    return cut.rstrip() + "…"
+
+
+def _format_items(
+    entries: list[RegistryEntry],
+    descriptions: dict[str, str] | None = None,
+) -> str:
+    descriptions = descriptions or {}
+    lines: list[str] = []
+    for e in entries:
+        lines.append(f"- {e.id}: {e.name_ko} ({len(e.source_ids)}개 문서)")
+        desc = (descriptions.get(e.id) or "").strip()
+        if desc:
+            lines.append(f"    설명: {desc}")
+    return "\n".join(lines)
 
 
 async def _group_batch(
@@ -71,12 +131,15 @@ async def _group_batch(
     model: str,
     kind: str,
     batch: list[RegistryEntry],
+    descriptions: dict[str, str] | None = None,
 ) -> list[list[str]]:
     """LLM 호출 1회로 batch 안의 entry 들을 그룹화."""
     if len(batch) <= 1:
         return [[e.id] for e in batch]
 
-    prompt = ALIAS_GROUP_PROMPT.format(kind=kind, items=_format_items(batch))
+    prompt = ALIAS_GROUP_PROMPT.format(
+        kind=kind, items=_format_items(batch, descriptions)
+    )
     response = await asyncio.to_thread(
         client.models.generate_content,
         model=model,
@@ -136,6 +199,7 @@ async def _group_all(
     model: str,
     kind: str,
     entries: list[RegistryEntry],
+    descriptions: dict[str, str] | None = None,
 ) -> list[list[str]]:
     """이름순 정렬 후 batch 단위로 LLM 그룹화 — 유사 이름이 같은 batch 에 모이도록."""
     sorted_entries = sorted(entries, key=lambda e: e.name_ko)
@@ -144,7 +208,7 @@ async def _group_all(
         for i in range(0, len(sorted_entries), _BATCH_SIZE)
     ]
     results = await asyncio.gather(
-        *[_group_batch(client, model, kind, b) for b in batches]
+        *[_group_batch(client, model, kind, b, descriptions) for b in batches]
     )
     flat: list[list[str]] = []
     for r in results:
@@ -247,10 +311,16 @@ async def canonicalize(registry_name: str, prefix: str) -> dict:
         logger.info(
             "정규화: %s type=%s 항목 %d개", registry_name, tname, len(entries)
         )
-        groups = await _group_all(client, model, tname, entries)
+        descs = {e.id: _extract_description(e) for e in entries}
+        groups = await _group_all(client, model, tname, entries, descs)
         for g in groups:
             if len(g) < 2:
                 continue
+            name_snapshot = {
+                i: registry.entries[i].name_ko
+                for i in g
+                if i in registry.entries
+            }
             canonical_id, absorbed_ids = absorb_group(registry, g, page_writer)
             if not absorbed_ids:
                 continue
@@ -262,7 +332,8 @@ async def canonicalize(registry_name: str, prefix: str) -> dict:
                     "canonical": canonical_id,
                     "canonical_name": registry.entries[canonical_id].name_ko,
                     "absorbed": [
-                        {"id": i, "name": _safe_name(registry, i)} for i in absorbed_ids
+                        {"id": i, "name": name_snapshot.get(i, "?")}
+                        for i in absorbed_ids
                     ],
                 }
             )
@@ -281,17 +352,6 @@ async def canonicalize(registry_name: str, prefix: str) -> dict:
         "absorbed": absorbed_total,
         "registry": len(registry.entries),
     }
-
-
-def _safe_name(registry: Registry, eid: str) -> str:
-    """entries.pop 직후에도 원래 이름을 표시하기 위해 name_index 역조회 fallback."""
-    e = registry.entries.get(eid)
-    if e:
-        return e.name_ko
-    for name, idv in registry.name_index.items():
-        if idv == eid:
-            return name
-    return "?"
 
 
 async def run_phase2_5() -> dict:

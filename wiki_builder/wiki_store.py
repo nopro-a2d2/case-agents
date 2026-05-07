@@ -39,10 +39,8 @@ _RAW_SUBSECTION_RE = re.compile(
 
 
 def _cite(doc_id: str, pages: list[int]) -> str:
-    """단일 인용 토큰 (source-{doc_id}:p1,p2,...) 또는 (source-{doc_id})"""
-    if not pages:
-        return f"(source-{doc_id})"
-    return f"(source-{doc_id}:{','.join(str(p) for p in pages)})"
+    """단일 인용 토큰 (source-{doc_id}). pages 는 데이터 레이어용으로 유지되나 표시에는 제외."""
+    return f"(source-{doc_id})"
 
 
 def _strip_sources_block(body: str) -> str:
@@ -94,9 +92,7 @@ def _format_failure(vf: dict) -> str:
         label = text[:200] + ("…" if len(text) > 200 else "")
     else:
         label = str(fld)
-    pages = fld.get("pages") or []
-    pages_suffix = f" (인용 p.{','.join(str(p) for p in pages)})" if pages else ""
-    return f"- **[{cat}]** {label}{pages_suffix}"
+    return f"- **[{cat}]** {label}"
 
 
 def write_source_page(

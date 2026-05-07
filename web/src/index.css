@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-brand: 215 119 87;
+  --c-brand-shimmer: 245 149 117;
+  --c-success: 105 219 124;
+  --c-error: 255 168 180;
+  --c-warning: 150 108 30;
+  --c-permission: 87 105 247;
+  --c-plan-mode: 0 102 102;
+  --c-user-bubble: 235 235 235;
+  --c-user-prefix: 34 197 94;
+  --c-border-prompt: 153 153 153;
+
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgb(20 20 20);
+}
+
+.dim { color: rgb(0 0 0 / 0.55); }
+
+@keyframes braille-spin {
+  0%   { content: "⠋"; }
+  10%  { content: "⠙"; }
+  20%  { content: "⠹"; }
+  30%  { content: "⠸"; }
+  40%  { content: "⠼"; }
+  50%  { content: "⠴"; }
+  60%  { content: "⠦"; }
+  70%  { content: "⠧"; }
+  80%  { content: "⠇"; }
+  90%  { content: "⠏"; }
+  100% { content: "⠋"; }
+}
+
+@keyframes cursor-blink {
+  0%, 50%   { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+.cursor-block {
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: cursor-blink 1s step-end infinite;
+}

@@ -5,7 +5,7 @@ google-genai SDK는 단일 인터페이스로 Gemini Developer API와 Vertex AI�
 클라이언트를 생성한다.
 
 인증: GOOGLE_APPLICATION_CREDENTIALS 환경변수가 가리키는 서비스 계정 JSON.
-프로젝트/위치: wiki_settings.GOOGLE_CLOUD_PROJECT, wiki_settings.GOOGLE_CLOUD_LOCATION.
+프로젝트/위치: wiki_settings.GCP_PROJECT, wiki_settings.VERTEX_LOCATION.
 """
 
 from google import genai
@@ -25,15 +25,15 @@ def get_genai_client() -> genai.Client:
     """
     global _client
     if _client is None:
-        if not wiki_settings.GOOGLE_CLOUD_PROJECT or not wiki_settings.GOOGLE_CLOUD_LOCATION:
+        if not wiki_settings.GCP_PROJECT or not wiki_settings.VERTEX_LOCATION:
             raise RuntimeError(
-                "Vertex AI 사용을 위해 GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION "
+                "Vertex AI 사용을 위해 GCP_PROJECT, VERTEX_LOCATION "
                 "환경변수를 설정하세요. (.env 또는 셸 환경)"
             )
         _client = genai.Client(
             vertexai=True,
-            project=wiki_settings.GOOGLE_CLOUD_PROJECT,
-            location=wiki_settings.GOOGLE_CLOUD_LOCATION,
+            project=wiki_settings.GCP_PROJECT,
+            location=wiki_settings.VERTEX_LOCATION,
             http_options=types.HttpOptions(
                 retry_options=types.HttpRetryOptions(
                     initial_delay=1.0,

@@ -14,13 +14,13 @@ from wiki_builder.models import (
     OrgFact,
     PageContent,
     PersonFact,
-    SparkDocument,
+    Document,
 )
 from wiki_builder.verifier import verify_compile_result
 
 
-def _doc(pages: dict[int, str]) -> SparkDocument:
-    return SparkDocument(
+def _doc(pages: dict[int, str]) -> Document:
+    return Document(
         id="X",
         name="테스트 문서",
         summary="요약",

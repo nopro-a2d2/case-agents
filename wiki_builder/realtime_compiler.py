@@ -10,7 +10,7 @@ from google import genai
 
 from wiki_builder.config import wiki_settings
 from wiki_builder.llm import get_genai_client
-from wiki_builder.models import CompileResult, SparkDocument
+from wiki_builder.models import CompileResult, CompileResultLLM, Document
 from wiki_builder.observability import log_generation
 from wiki_builder.compiler import (
     delete_compile_cache,
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 async def compile_one(
     client: genai.Client,
-    doc: SparkDocument,
+    doc: Document,
     sem: asyncio.Semaphore,
     progress: dict,
 ) -> tuple[str, CompileResult | None]:
@@ -66,6 +66,7 @@ async def compile_one(
                     "system_instruction": SOURCE_COMPILE_SYSTEM,
                     "temperature": 0.1,
                     "response_mime_type": "application/json",
+                    "response_schema": CompileResultLLM,
                 },
             )
 
@@ -126,7 +127,7 @@ async def compile_one(
 
 
 async def run_phase1_realtime(
-    docs: list[SparkDocument],
+    docs: list[Document],
     concurrency: int = 15,
 ) -> dict[str, CompileResult]:
     """Phase 1: 실시간 API 병렬 컴파일

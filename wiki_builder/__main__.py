@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="synth phase 에서 source_count 변동 여부와 무관하게 모든 페이지 재합성",
     )
+    parser.add_argument("--c1", type=int, default=15, help="Phase 1 동시성 (기본 15)")
+    parser.add_argument("--c2", type=int, default=10, help="Phase 2 동시성 (기본 10)")
+    parser.add_argument("--c3", type=int, default=10, help="Phase 3 동시성 (기본 10)")
+    parser.add_argument("--cs", type=int, default=8, help="Phase synth 동시성 (기본 8)")
+    parser.add_argument("--c7", type=int, default=10, help="Phase 7 동시성 (기본 10)")
     return parser.parse_args()
 
 
@@ -106,7 +111,7 @@ async def main() -> None:
     # === Phase 1: 소스 컴파일 ===
     if run_all or args.phase == "1":
         logger.info("=== Phase 1: 소스 컴파일 (실시간 API) ===")
-        compile_results = await run_phase1_realtime(docs, concurrency=15)
+        compile_results = await run_phase1_realtime(docs, concurrency=args.c1)
         stats = get_token_stats()
         logger.info(
             "Phase 1 토큰: 입력 %d, 출력 %d, 호출 %d회",
@@ -155,7 +160,7 @@ async def main() -> None:
     # === Phase 2: 엔티티 점진적 성장 ===
     if run_all or args.phase == "2":
         logger.info("=== Phase 2: 엔티티 점진적 성장 ===")
-        entity_registry = await run_phase2(compile_results, doc_order)
+        entity_registry = await run_phase2(compile_results, doc_order, concurrency=args.c2)
         append_log(f"Phase 2: 엔티티 {len(entity_registry.entries)}개")
 
     # === Phase 2.5: entity alias canonicalization ===
@@ -171,7 +176,7 @@ async def main() -> None:
     # === Phase 3: 개념 점진적 성장 ===
     if run_all or args.phase == "3":
         logger.info("=== Phase 3: 개념 점진적 성장 ===")
-        concept_registry = await run_phase3(compile_results, doc_order)
+        concept_registry = await run_phase3(compile_results, doc_order, concurrency=args.c3)
         append_log(f"Phase 3: 개념 {len(concept_registry.entries)}개")
 
     # === Phase 3.5: concept alias canonicalization ===
@@ -189,7 +194,7 @@ async def main() -> None:
         from wiki_builder.synthesizer import run_synthesis
 
         logger.info("=== Phase synth: SYNTHESIS 합성 ===")
-        synth_stats = await run_synthesis(force=args.force_synth)
+        synth_stats = await run_synthesis(force=args.force_synth, concurrency=args.cs)
         append_log(
             f"Phase synth: entity {synth_stats['entity']['synthesized']}건, "
             f"concept {synth_stats['concept']['synthesized']}건 합성"
@@ -243,7 +248,7 @@ async def main() -> None:
         from wiki_builder.embedder import run_phase7
 
         logger.info("=== Phase 7: 임베딩 인덱스 빌드 ===")
-        embed_stats = await run_phase7()
+        embed_stats = await run_phase7(concurrency=args.c7)
         append_log(
             f"Phase 7: 임베딩 {embed_stats['total']}개 "
             f"(신규 {embed_stats['new']}, 갱신 {embed_stats['updated']}, "

@@ -7,6 +7,7 @@
 
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -15,8 +16,16 @@ class WikiSettings(BaseSettings):
     # GOOGLE_APPLICATION_CREDENTIALS 는 WikiSettings 필드가 아니라 google-auth 가 os.environ 에서 직접 읽음.
     # pydantic-settings 는 .env 를 인스턴스 속성에만 채울 뿐 os.environ 에 주입하지 않으므로,
     # 엔트리포인트(build_wiki.py / run_chatbot.py)에서 dotenv.load_dotenv() 를 먼저 호출해야 함.
-    GOOGLE_CLOUD_PROJECT: str = ""
-    GOOGLE_CLOUD_LOCATION: str = ""
+    # case_agent 와 동일한 .env 키(GCP_PROJECT / VERTEX_LOCATION)를 우선 사용하고,
+    # GOOGLE_CLOUD_* 도 fallback 으로 허용.
+    GCP_PROJECT: str = Field(
+        default="",
+        validation_alias=AliasChoices("GCP_PROJECT", "GOOGLE_CLOUD_PROJECT"),
+    )
+    VERTEX_LOCATION: str = Field(
+        default="",
+        validation_alias=AliasChoices("VERTEX_LOCATION", "GOOGLE_CLOUD_LOCATION"),
+    )
     BATCH_MODEL: str = "gemini-3.1-flash-lite-preview"
     REALTIME_MODEL: str = "gemini-3.1-flash-lite-preview"
 

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PageContent(BaseModel):
@@ -10,15 +10,27 @@ class PageContent(BaseModel):
     text: str
 
 
-class SparkDocument(BaseModel):
+class Document(BaseModel):
     id: str
     name: str
-    summary: str
-    total_page: int
-    token_count: int
-    category: str
+    summary: str = ""
+    total_page: int = 0
+    token_count: int = 0
+    category: str = ""
     person: str | None = None
     content: list[PageContent]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_missing(cls, data):
+        if not isinstance(data, dict):
+            return data
+        content = data.get("content") or []
+        if not data.get("total_page"):
+            data["total_page"] = len(content)
+        if not data.get("token_count"):
+            data["token_count"] = sum(len(p.get("text", "")) for p in content) // 2
+        return data
 
     @property
     def full_text(self) -> str:
@@ -87,6 +99,17 @@ class CompileResult(BaseModel):
     # Phase 1.5 verifier 가 채우는 환각/오인용 fact 분리 목록.
     # 캐시된 raw LLM 응답에는 없으므로 default 비워두고, parse 후 verifier 가 주입.
     verification_failures: list[dict] = Field(default_factory=list)
+
+
+class CompileResultLLM(BaseModel):
+    """Gemini response_schema 전용. 서버측에서 채우는 doc_id / verification_failures 는 제외."""
+
+    schema_version: int = 2
+    summary: str
+    key_facts: KeyFacts
+    detailed_content: list[DetailedSentence]
+    entities: list[ExtractedEntity]
+    concepts: list[ExtractedConcept]
 
 
 class RegistryEntry(BaseModel):

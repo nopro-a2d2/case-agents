@@ -5,13 +5,13 @@ import logging
 from pathlib import Path
 
 from wiki_builder.config import wiki_settings
-from wiki_builder.models import CompileResult, SparkDocument
+from wiki_builder.models import CompileResult, CompileResultLLM, Document
 from wiki_builder.prompts import SOURCE_COMPILE_PROMPT, SOURCE_COMPILE_SYSTEM
 
 logger = logging.getLogger(__name__)
 
 
-def build_batch_request(doc: SparkDocument) -> dict:
+def build_batch_request(doc: Document) -> dict:
     """문서 1개를 Batch API 요청으로 변환"""
     prompt = SOURCE_COMPILE_PROMPT.format(
         doc_id=doc.id,
@@ -30,6 +30,7 @@ def build_batch_request(doc: SparkDocument) -> dict:
             "generation_config": {
                 "temperature": 0.1,
                 "response_mime_type": "application/json",
+                "response_schema": CompileResultLLM.model_json_schema(),
             },
         },
     }
