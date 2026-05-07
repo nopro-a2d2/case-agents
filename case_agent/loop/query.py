@@ -16,6 +16,8 @@ We stay on LangChain ``BaseMessage`` types end-to-end so
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import uuid
 from collections.abc import AsyncIterator, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -31,8 +33,12 @@ from langchain_core.messages import (
 from .types import (
     Done,
     StreamEvent,
+    SubagentTextDelta,
+    SubagentToolEnd,
+    SubagentToolStart,
     Terminal,
     TextDelta,
+    TodosUpdated,
     ToolEnd,
     ToolStart,
     TurnStart,
@@ -42,6 +48,8 @@ from .types import (
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
+
+    from ..tools.todos import TodoStore
 
 
 DEFAULT_MAX_TURNS = 25
@@ -55,6 +63,8 @@ async def query(
     model: "BaseChatModel",
     max_turns: int = DEFAULT_MAX_TURNS,
     abort: asyncio.Event | None = None,
+    stream_timeout: float | None = None,
+    todos_store: "TodoStore | None" = None,
 ) -> AsyncIterator[StreamEvent]:
     """Run the LLM↔Tool loop until end_turn, max_turns, or abort.
 
@@ -77,7 +87,7 @@ async def query(
 
     for turn in range(1, max_turns + 1):
         if abort is not None and abort.is_set():
-            yield Done(Terminal("aborted"))
+            yield Done(Terminal("aborted", messages=tuple(state[1:])))
             return
 
         yield TurnStart(turn)
@@ -85,24 +95,29 @@ async def query(
         # 1. Stream the assistant turn — accumulate chunks via __add__ fold.
         accumulated: AIMessageChunk | None = None
         try:
-            async for chunk in model_with_tools.astream(state):
-                if not isinstance(chunk, AIMessageChunk):
-                    # Some adapters yield a final AIMessage as the last chunk;
-                    # cast to chunk so the fold stays homogeneous.
-                    chunk = AIMessageChunk(  # type: ignore[assignment]
-                        content=getattr(chunk, "content", ""),
-                        additional_kwargs=getattr(chunk, "additional_kwargs", {}),
-                    )
-                accumulated = chunk if accumulated is None else accumulated + chunk
-                delta = coerce_text(chunk.content)
-                if delta:
-                    yield TextDelta(delta)
+            cm = asyncio.timeout(stream_timeout) if stream_timeout is not None else contextlib.nullcontext()
+            async with cm:
+                async for chunk in model_with_tools.astream(state):
+                    if not isinstance(chunk, AIMessageChunk):
+                        # Some adapters yield a final AIMessage as the last chunk;
+                        # cast to chunk so the fold stays homogeneous.
+                        chunk = AIMessageChunk(  # type: ignore[assignment]
+                            content=getattr(chunk, "content", ""),
+                            additional_kwargs=getattr(chunk, "additional_kwargs", {}),
+                        )
+                    accumulated = chunk if accumulated is None else accumulated + chunk
+                    delta = coerce_text(chunk.content)
+                    if delta:
+                        yield TextDelta(delta)
+        except asyncio.TimeoutError:
+            yield Done(Terminal("error", error="model stream timed out", messages=tuple(state[1:])))
+            return
         except Exception as e:  # noqa: BLE001 — surface any model error to caller
-            yield Done(Terminal("error", error=f"{type(e).__name__}: {e}"))
+            yield Done(Terminal("error", error=f"{type(e).__name__}: {e}", messages=tuple(state[1:])))
             return
 
         if accumulated is None:
-            yield Done(Terminal("error", error="model produced no chunks"))
+            yield Done(Terminal("error", error="model produced no chunks", messages=tuple(state[1:])))
             return
 
         assistant_msg = AIMessage(
@@ -115,12 +130,12 @@ async def query(
 
         # 2. stop_reason branch.
         if not assistant_msg.tool_calls:
-            yield Done(Terminal("completed", final_text=coerce_text(assistant_msg.content)))
+            yield Done(Terminal("completed", final_text=coerce_text(assistant_msg.content), messages=tuple(state[1:])))
             return
 
         # 3. Execute each tool_use → append ToolMessage(s).
         for tc in assistant_msg.tool_calls:
-            tc_id = tc.get("id") or ""
+            tc_id = tc.get("id") or str(uuid.uuid4())
             tc_name = tc.get("name") or ""
             tc_args = tc.get("args") or {}
             yield ToolStart(tc_id, tc_name, dict(tc_args))
@@ -135,7 +150,24 @@ async def query(
                 continue
 
             try:
-                output = await tool.ainvoke(tc_args)
+                if hasattr(tool, "_arun_streaming"):
+                    # StreamingTaskTool: bubble subagent events up to the TUI.
+                    output = ""
+                    async for sub_ev in tool._arun_streaming(**tc_args):
+                        if isinstance(sub_ev, TextDelta) and sub_ev.text:
+                            yield SubagentTextDelta(tc_id, sub_ev.text)
+                        elif isinstance(sub_ev, ToolStart):
+                            yield SubagentToolStart(tc_id, sub_ev.id, sub_ev.name, sub_ev.input)
+                        elif isinstance(sub_ev, ToolEnd):
+                            yield SubagentToolEnd(tc_id, sub_ev.id, sub_ev.output, sub_ev.is_error)
+                        elif isinstance(sub_ev, Done):
+                            output = sub_ev.terminal.final_text or ""
+                            if sub_ev.terminal.reason == "error":
+                                output = f"subagent error: {sub_ev.terminal.error}"
+                            elif sub_ev.terminal.reason != "completed":
+                                output = f"subagent stopped: reason={sub_ev.terminal.reason}"
+                else:
+                    output = await tool.ainvoke(tc_args)
                 state.append(
                     ToolMessage(
                         content=_stringify_tool_output(output),
@@ -143,6 +175,8 @@ async def query(
                     )
                 )
                 yield ToolEnd(tc_id, output, False)
+                if tc_name == "write_todos" and todos_store is not None:
+                    yield TodosUpdated(todos=tuple(todos_store.snapshot()))
             except Exception as e:  # noqa: BLE001 — feed error back to the model
                 err = f"{type(e).__name__}: {e}"
                 state.append(
@@ -151,7 +185,7 @@ async def query(
                 yield ToolEnd(tc_id, err, True)
         # 4. continue → next iteration calls the model with the appended results.
 
-    yield Done(Terminal("max_turns"))
+    yield Done(Terminal("max_turns", messages=tuple(state[1:])))
 
 
 def _stringify_tool_output(output: Any) -> str:

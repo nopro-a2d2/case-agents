@@ -72,6 +72,7 @@ class SearchResult:
     neighbors: list[Hit] = field(default_factory=list)
     drilldown: list[dict] = field(default_factory=list)
     trace: list[str] = field(default_factory=list)
+    low_confidence: bool = False  # top seed score < 0.55; drilldown recommended
 
     def to_dict(self) -> dict:
         return {
@@ -79,6 +80,7 @@ class SearchResult:
             "neighbors": [h.to_dict() for h in self.neighbors],
             "drilldown": self.drilldown,
             "trace": self.trace,
+            "low_confidence": self.low_confidence,
         }
 
 
@@ -205,10 +207,11 @@ def smart_search(
     embedder: Embedder,
     query: str,
     *,
-    k: int = 8,
+    k: int = 10,
     hop: int = 1,
     max_neighbors: int = 10,
     drilldown: bool = False,
+    _qvec: "np.ndarray | None" = None,
 ) -> SearchResult:
     """Lookup with priority wiki → cache → 1-hop KG → (optional) json/sources.
 
@@ -221,12 +224,13 @@ def smart_search(
         max_neighbors: cap for neighbors after scoring
         drilldown:  if True, include json drill-down hints (json paths only,
                     not full text — caller decides what to read)
+        _qvec:      pre-computed query vector (skips embedding if provided)
     """
     idx = CaseIndex(ws)
     res = SearchResult()
 
     # ---- 1. wiki-output: semantic search over registry md files ----
-    qvec = embedder.embed(query).astype(np.float32)
+    qvec = (_qvec if _qvec is not None else embedder.embed(query)).astype(np.float32)
     if qvec.shape[0] != idx.vectors.shape[1]:
         raise ValueError(
             f"query embedding dim {qvec.shape[0]} != index dim {idx.vectors.shape[1]} "
@@ -246,6 +250,11 @@ def smart_search(
     top_rows = top_rows[np.argsort(-sims[top_rows])]
     seeds = [idx.hit_from_row(int(r), float(sims[int(r)]), edge="seed") for r in top_rows]
     res.seeds = seeds
+    if seeds and seeds[0].score < 0.55:
+        res.low_confidence = True
+        res.trace.append(
+            f"low-confidence: top score={seeds[0].score:.3f} < 0.55; drilldown recommended"
+        )
     res.trace.append(f"wiki-embeddings: {len(seeds)} seed hits (model={idx.manifest.get('model')})")
 
     # ---- 2. cache: enrich seed registry metadata is implicit via ID; nothing to add here ----
@@ -269,7 +278,11 @@ def smart_search(
             if reg:
                 for sid in reg.get("source_ids", []):
                     seen_source_ids.add(str(sid))
-        for sid in sorted(seen_source_ids, key=lambda s: (len(s), s)):
+        # Non-numeric ids (e.g. "공소장") first so key documents surface at the top.
+        def _sid_sort_key(s: str) -> tuple:
+            is_num = s.isdigit()
+            return (int(is_num), int(s) if is_num else s)
+        for sid in sorted(seen_source_ids, key=_sid_sort_key):
             if ws.exists(f"json/{sid}.json"):
                 res.drilldown.append({"path": f"json/{sid}.json", "via_source_id": sid})
         res.trace.append(f"drilldown: {len(res.drilldown)} json source files referenced")

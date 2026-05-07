@@ -21,10 +21,12 @@ from case_agent.loop.types import (
     Done,
     Terminal,
     TextDelta,
+    TodosUpdated,
     ToolEnd,
     ToolStart,
     TurnStart,
 )
+from case_agent.tools.todos import TodoStore, build_write_todos_tool
 
 
 # ---------------------------------------------------------------- stubs
@@ -108,7 +110,8 @@ def test_end_turn_returns_completed_with_final_text():
     text_deltas = [e.text for e in events if isinstance(e, TextDelta)]
     assert text_deltas == ["피고인은 ", "홍길동입니다."]
     assert isinstance(events[-1], Done)
-    assert events[-1].terminal == Terminal("completed", final_text="피고인은 홍길동입니다.")
+    assert events[-1].terminal.reason == "completed"
+    assert events[-1].terminal.final_text == "피고인은 홍길동입니다."
 
 
 def test_tool_use_then_end_turn_appends_tool_message_and_continues():
@@ -200,7 +203,9 @@ def test_abort_event_stops_before_next_turn():
 
     model = _StubModel([[_text_chunk("never reached")]])
     events = _collect(_drain(model=model, tools=[tool], abort=abort))
-    assert events == [Done(Terminal("aborted"))]
+    assert len(events) == 1
+    assert isinstance(events[0], Done)
+    assert events[0].terminal.reason == "aborted"
 
 
 def test_final_text_is_empty_for_pure_tool_use_then_end():
@@ -218,6 +223,139 @@ def test_final_text_is_empty_for_pure_tool_use_then_end():
     assert isinstance(events[-1], Done)
     assert events[-1].terminal.reason == "completed"
     assert events[-1].terminal.final_text == ""
+
+
+def test_stream_timeout_yields_error_done():
+    """stream_timeout reached mid-stream → Done(error, 'timed out')."""
+    import asyncio
+
+    async def _slow_gen():
+        yield AIMessageChunk(content="partial")
+        await asyncio.sleep(10)  # never reached under timeout
+        yield AIMessageChunk(content="unreachable")
+
+    class _SlowModel:
+        def bind_tools(self, _tools):
+            return self
+
+        def astream(self, _messages):
+            return _slow_gen()
+
+    async def _run():
+        from langchain_core.messages import HumanMessage
+
+        events = []
+        async for ev in query(
+            messages=[HumanMessage(content="hi")],
+            system_prompt="sys",
+            tools=[],
+            model=_SlowModel(),
+            stream_timeout=0.05,
+        ):
+            events.append(ev)
+        return events
+
+    events = asyncio.run(_run())
+    assert isinstance(events[-1], Done)
+    assert events[-1].terminal.reason == "error"
+    assert "timed out" in (events[-1].terminal.error or "")
+
+
+def test_missing_tool_call_id_gets_uuid_fallback():
+    """A tool chunk with no id must still produce a unique, non-empty tc_id."""
+
+    async def search(query: str) -> str:
+        return "result"
+
+    tool = _make_tool("smart_search", search)
+
+    # Chunk with empty id — simulates providers that omit it.
+    chunk = AIMessageChunk(content="", tool_calls=[
+        {"id": "", "name": "smart_search", "args": {"query": "x"}, "type": "tool_call"},
+    ])
+    model = _StubModel([
+        [chunk],
+        [_text_chunk("done")],
+    ])
+    events = _collect(_drain(model=model, tools=[tool]))
+
+    starts = [e for e in events if isinstance(e, ToolStart)]
+    ends = [e for e in events if isinstance(e, ToolEnd)]
+    assert len(starts) == 1
+    assert starts[0].id != ""  # must have a fallback UUID
+    assert ends[0].id == starts[0].id  # start/end IDs must match
+
+
+def test_write_todos_emits_todos_updated_event_after_tool_end():
+    """A successful write_todos call must yield TodosUpdated immediately
+    after the matching ToolEnd, carrying the snapshot."""
+    store = TodoStore()
+    tool = build_write_todos_tool(store)
+
+    todos_payload = [
+        {"content": "step 1", "status": "in_progress"},
+        {"content": "step 2", "status": "pending"},
+    ]
+    model = _StubModel([
+        [_tool_chunk(tc_id="t1", name="write_todos", args={"todos": todos_payload})],
+        [_text_chunk("plan posted")],
+    ])
+
+    async def _run():
+        from langchain_core.messages import HumanMessage
+
+        events = []
+        async for ev in query(
+            messages=[HumanMessage(content="hi")],
+            system_prompt="sys",
+            tools=[tool],
+            model=model,
+            todos_store=store,
+        ):
+            events.append(ev)
+        return events
+
+    events = asyncio.run(_run())
+
+    # ToolEnd → TodosUpdated must be adjacent.
+    end_idx = next(i for i, e in enumerate(events) if isinstance(e, ToolEnd))
+    next_ev = events[end_idx + 1]
+    assert isinstance(next_ev, TodosUpdated)
+    assert list(next_ev.todos) == todos_payload
+    assert store.snapshot() == todos_payload
+
+
+def test_no_todos_updated_event_when_store_omitted():
+    """Without a todos_store wired in, the loop must not emit TodosUpdated
+    even when write_todos runs."""
+    store = TodoStore()
+    tool = build_write_todos_tool(store)
+
+    model = _StubModel([
+        [_tool_chunk(
+            tc_id="t1",
+            name="write_todos",
+            args={"todos": [{"content": "x", "status": "pending"}]},
+        )],
+        [_text_chunk("done")],
+    ])
+
+    async def _run():
+        from langchain_core.messages import HumanMessage
+
+        events = []
+        async for ev in query(
+            messages=[HumanMessage(content="hi")],
+            system_prompt="sys",
+            tools=[tool],
+            model=model,
+            # todos_store intentionally omitted
+        ):
+            events.append(ev)
+        return events
+
+    events = asyncio.run(_run())
+    assert not any(isinstance(e, TodosUpdated) for e in events)
 
 
 if __name__ == "__main__":  # pragma: no cover

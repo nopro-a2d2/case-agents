@@ -70,9 +70,9 @@ def build_light(
     max_output_tokens: int = 4096,
 ):
     """Gemini Flash via Vertex."""
-    from langchain_google_vertexai import ChatVertexAI
+    from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatVertexAI(
+    return ChatGoogleGenerativeAI(
         model=model or DEFAULT_LIGHT_MODEL,
         project=_project(),
         location=location or DEFAULT_LOCATION,
@@ -84,14 +84,12 @@ def build_light(
 
 @lru_cache(maxsize=4)
 def _embedding_client(model: str, location: str, output_dim: int):
-    from langchain_google_vertexai import VertexAIEmbeddings
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-    return VertexAIEmbeddings(
-        model_name=model,
-        project=_project(),
-        location=location,
+    return GoogleGenerativeAIEmbeddings(
+        model=model,
         credentials=get_credentials(),
-        dimensions=output_dim,
+        output_dimensionality=output_dim,
     )
 
 
@@ -112,6 +110,16 @@ class VertexEmbedderAdapter:
     def embed(self, text: str) -> np.ndarray:
         client = _embedding_client(self._model, self._location, self._output_dim)
         vec = np.asarray(client.embed_query(text), dtype=np.float32)
+        if vec.shape != (self._output_dim,):
+            raise RuntimeError(
+                f"embedder returned shape {vec.shape}, expected ({self._output_dim},); "
+                f"model={self._model} location={self._location}"
+            )
+        return vec
+
+    async def aembed(self, text: str) -> np.ndarray:
+        client = _embedding_client(self._model, self._location, self._output_dim)
+        vec = np.asarray(await client.aembed_query(text), dtype=np.float32)
         if vec.shape != (self._output_dim,):
             raise RuntimeError(
                 f"embedder returned shape {vec.shape}, expected ({self._output_dim},); "

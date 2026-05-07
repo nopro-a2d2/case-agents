@@ -10,12 +10,14 @@ All tools are case-bound via closure capture of `(workspace, embedder)`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from langchain_core.tools import tool
 
 from ..workspace import Workspace
+from .calculate import CalculateTool
 from .citation import list_evidence as _list_evidence, read_with_anchor as _read_with_anchor
 from .search import Embedder, smart_search as _smart_search
 from .verify import (
@@ -26,12 +28,12 @@ from .verify import (
 
 def build_smart_search_tool(workspace: Workspace, embedder: Embedder):
     @tool
-    def smart_search(
+    async def smart_search(
         query: str,
         k: int = 8,
         hop: int = 1,
         max_neighbors: int = 10,
-        drilldown: bool = False,
+        drilldown: bool = True,
     ) -> str:
         """Find case knowledge by semantic search over wiki-output, with optional 1-hop KG expansion.
 
@@ -49,6 +51,8 @@ def build_smart_search_tool(workspace: Workspace, embedder: Embedder):
             max_neighbors: cap for KG neighbors after scoring (default 10).
             drilldown: if True, list json/<source>.json paths referenced by hits.
         """
+        async with asyncio.timeout(30):
+            qvec = await embedder.aembed(query)
         result = _smart_search(
             workspace,
             embedder,
@@ -57,6 +61,7 @@ def build_smart_search_tool(workspace: Workspace, embedder: Embedder):
             hop=hop,
             max_neighbors=max_neighbors,
             drilldown=drilldown,
+            _qvec=qvec,
         )
         return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
 
@@ -152,6 +157,11 @@ def build_check_completeness_tool(workspace: Workspace):
     return check_completeness
 
 
+def build_calculate_tool() -> CalculateTool:
+    """Return a CalculateTool instance (no workspace dependency)."""
+    return CalculateTool()
+
+
 def build_case_tools(workspace: Workspace, embedder: Embedder) -> list[Any]:
     """Convenience: every case-aware tool, ready to hand to create_deep_agent."""
     return [
@@ -160,4 +170,5 @@ def build_case_tools(workspace: Workspace, embedder: Embedder) -> list[Any]:
         build_list_evidence_tool(workspace),
         build_verify_citations_tool(workspace),
         build_check_completeness_tool(workspace),
+        build_calculate_tool(),
     ]

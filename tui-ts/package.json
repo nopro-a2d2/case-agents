@@ -1,0 +1,19 @@
+{
+  "name": "case-agent-tui",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.tsx",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^18.3.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

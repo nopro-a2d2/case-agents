@@ -1,19 +1,21 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { colors, glyphs, spacing } from "../theme.js";
 
 interface Props {
   onSubmit: (value: string) => void;
   disabled?: boolean;
+  planMode?: boolean;
 }
 
-export function PromptInput({ onSubmit, disabled = false }: Props) {
+export function PromptInput({ onSubmit, disabled = false, planMode = false }: Props) {
   const [value, setValue] = useState("");
 
   useInput((input, key) => {
     if (disabled) return;
     if (key.return) {
       const trimmed = value.trim();
-      if (trimmed) { onSubmit(trimmed); setValue(""); }
+      if (trimmed) { setValue(""); onSubmit(trimmed); }
       return;
     }
     if (key.backspace || key.delete) {
@@ -26,11 +28,20 @@ export function PromptInput({ onSubmit, disabled = false }: Props) {
   });
 
   return (
-    <Box flexDirection="row" paddingX={2} marginTop={1}>
-      <Text bold color="green">{">"} </Text>
+    <Box
+      marginX={spacing.sm}
+      marginTop={spacing.xs}
+      paddingX={spacing.xs}
+      borderStyle="round"
+      borderColor={planMode ? colors.planMode : colors.borderPrompt}
+    >
+      {disabled
+        ? <Text bold dimColor>{glyphs.userPrefix} </Text>
+        : <Text bold color={colors.userPrefix}>{glyphs.userPrefix} </Text>
+      }
       <Text>{value}</Text>
       {!disabled && <Text inverse>{" "}</Text>}
-      {disabled && <Text dimColor>{"…"}</Text>}
+      {disabled && <Text dimColor>{glyphs.ellipsis}</Text>}
     </Box>
   );
 }

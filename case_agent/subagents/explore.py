@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from deepagents import FilesystemPermission, SubAgent
-
 from ..prompts import EXPLORE_SYSTEM_PROMPT
 from ..tools.agent_tools import (
     build_read_with_anchor_tool,
@@ -24,26 +22,17 @@ if TYPE_CHECKING:
     from ..workspace import Workspace
 
 
-# Block all writes for the explore agent. Reads through the FilesystemBackend
-# are still possible (and cheaper than going through smart_search), but the
-# main flow should always be smart_search-first.
-_EXPLORE_PERMISSIONS = [
-    FilesystemPermission(operations=["write", "edit"], paths=["/**"], mode="deny"),
-    FilesystemPermission(operations=["read", "ls", "glob", "grep"], paths=["/**"], mode="allow"),
-]
-
-
 def build_explore_subagent(
     workspace: "Workspace",
     embedder: "Embedder",
     *,
     model: "BaseChatModel | None" = None,
-) -> SubAgent:
+) -> dict[str, Any]:
     tools: list[Any] = [
         build_smart_search_tool(workspace, embedder),
         build_read_with_anchor_tool(workspace),
     ]
-    sa: SubAgent = {
+    sa: dict[str, Any] = {
         "name": "explore",
         "description": (
             "Search and read case documents (wiki/cache/json/sources) and return "
@@ -53,7 +42,6 @@ def build_explore_subagent(
         ),
         "system_prompt": EXPLORE_SYSTEM_PROMPT,
         "tools": tools,
-        "permissions": _EXPLORE_PERMISSIONS,
     }
     if model is not None:
         sa["model"] = model

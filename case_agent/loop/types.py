@@ -8,9 +8,11 @@ by ``langchain-anthropic`` when the messages reach the model.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal, Union
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, Union
 
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
 
 TerminalReason = Literal["completed", "max_turns", "aborted", "error"]
 
@@ -22,6 +24,7 @@ class Terminal:
     reason: TerminalReason
     final_text: str | None = None
     error: str | None = None
+    messages: tuple[BaseMessage, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,50 @@ class Done:
     terminal: Terminal
 
 
-StreamEvent = Union[TurnStart, TextDelta, ToolStart, ToolEnd, Done]
+@dataclass(frozen=True)
+class SubagentTextDelta:
+    """A streamed text chunk from inside a subagent run."""
+
+    tool_id: str  # parent task tool-call ID
+    text: str
+
+
+@dataclass(frozen=True)
+class SubagentToolStart:
+    """A tool call started inside a subagent run."""
+
+    tool_id: str  # parent task tool-call ID
+    sub_id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SubagentToolEnd:
+    """A tool call finished inside a subagent run."""
+
+    tool_id: str  # parent task tool-call ID
+    sub_id: str
+    output: Any
+    is_error: bool
+
+
+@dataclass(frozen=True)
+class TodosUpdated:
+    """The session todo list changed — emitted after a successful
+    ``write_todos`` tool call. ``todos`` is a snapshot (list of dicts
+    with ``content`` and ``status`` keys).
+    """
+
+    todos: tuple[dict[str, Any], ...]
+
+
+StreamEvent = Union[
+    TurnStart, TextDelta, ToolStart, ToolEnd,
+    SubagentTextDelta, SubagentToolStart, SubagentToolEnd,
+    TodosUpdated,
+    Done,
+]
 
 
 def coerce_text(content: Any) -> str:
@@ -90,9 +136,13 @@ def coerce_text(content: Any) -> str:
 __all__ = [
     "Done",
     "StreamEvent",
+    "SubagentTextDelta",
+    "SubagentToolEnd",
+    "SubagentToolStart",
     "Terminal",
     "TerminalReason",
     "TextDelta",
+    "TodosUpdated",
     "ToolEnd",
     "ToolStart",
     "TurnStart",

@@ -2,7 +2,11 @@
 
 LocalFS maps to data/{case_id}/...; future S3FS to s3://{bucket}/case/{case_id}/...
 Read-only protected directories: wiki-output/, cache/, json/, sources/, txt/.
-Writable: artifacts/, drafts/, notes/, audit/.
+Writable: artifacts/ (all outputs), audit/, plans/, memory/, state/.
+
+Note: ``drafts/`` and ``notes/`` are retained in WRITABLE_PREFIXES for legacy
+compatibility, but the system prompt now directs every output to ``artifacts/``.
+``MEMORY.md`` lives at the workspace root (no prefix).
 """
 
 from __future__ import annotations
@@ -23,9 +27,14 @@ READONLY_PREFIXES: tuple[str, ...] = (
 
 WRITABLE_PREFIXES: tuple[str, ...] = (
     "artifacts",
+    "audit",
+    "plans",
+    "memory",
+    "state",
+    # Legacy — kept writable for backward compatibility but no longer the
+    # documented target. New work goes to artifacts/.
     "drafts",
     "notes",
-    "audit",
 )
 
 

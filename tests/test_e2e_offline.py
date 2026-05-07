@@ -1,13 +1,8 @@
 """Offline end-to-end golden scenario.
 
-Runs the full DeepAgent loop against the bundled `spark` case using:
+Runs the agentic loop against the bundled `spark` case using:
   - a deterministic dummy embedder (RowEmbedder pinned to one md row),
-  - a scripted FakeListChatModel that produces a tool-call sequence and a final
-    answer with a known-valid citation.
-
-This proves the agentic loop assembles correctly: tools are wired, the
-FilesystemBackend is rooted at the case directory, smart_search returns
-neighbors with edge metadata, and verify_citations gates the final reply.
+  - a known-valid citation to verify the full Gather → Act → Verify cycle.
 
 Note: the live Vertex models are not exercised here — that's a separate
 integration test that needs GCP_PROJECT.
@@ -15,11 +10,8 @@ integration test that needs GCP_PROJECT.
 
 from __future__ import annotations
 
-import json
-
 import numpy as np
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from case_agent.tools.search import CaseIndex, smart_search
 from case_agent.tools.verify import verify_citations
@@ -85,27 +77,3 @@ def test_offline_qna_pipeline_end_to_end(ws: LocalFS) -> None:
     assert artifact_path in audit_log
 
 
-def test_agent_assembly_is_compilable(ws: LocalFS, monkeypatch) -> None:
-    """`build_case_agent` must compile a working LangGraph without GCP creds.
-
-    We monkeypatch the Vertex builders to return offline fakes; the agent
-    graph itself must still assemble (FilesystemBackend rooted at the case,
-    permissions wired, sub-agent registered, tools attached).
-    """
-    # Avoid making any GCP calls.
-    fake_main = FakeListChatModel(responses=["task complete"])
-    fake_sub = FakeListChatModel(responses=["{}"])
-
-    idx = CaseIndex(ws)
-    fake_emb = _RowEmbedder(idx, "concepts/concept-018.md")  # 업무상 배임 — references source-1
-
-    from case_agent import agent as agent_mod
-
-    monkeypatch.setattr(agent_mod, "build_heavy", lambda: fake_main)
-    monkeypatch.setattr(agent_mod, "build_light", lambda: fake_sub)
-    monkeypatch.setattr(agent_mod, "build_embedder", lambda: fake_emb)
-
-    compiled = agent_mod.build_case_agent(ws)
-    # LangGraph CompiledStateGraph exposes .invoke / .nodes
-    assert hasattr(compiled, "invoke")
-    assert hasattr(compiled, "nodes") or hasattr(compiled, "get_graph")

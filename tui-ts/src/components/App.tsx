@@ -1,64 +1,80 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput } from "ink";
-import type { Message, ToolCallState } from "../types.js";
+import { Box, useApp, useInput } from "ink";
+import type { AssistantBlock, Message, TodoItem, ToolCallState } from "../types.js";
 import type { PythonBridge } from "../bridge.js";
 import type { StreamEvent } from "../types.js";
 import { AssistantBubble } from "./AssistantBubble.js";
 import { UserBubble } from "./UserBubble.js";
 import { PromptInput } from "./PromptInput.js";
 import { Header } from "./Header.js";
+import { ThinkingSpinner } from "./ThinkingSpinner.js";
+import { StatusLine } from "./StatusLine.js";
+import { TodoPanel } from "./TodoPanel.js";
+import { WelcomeScreen } from "./WelcomeScreen.js";
 
 interface Props {
   bridge: PythonBridge;
   caseId: string;
+  model: string;
 }
 
-const THINK_SPINNER = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+type AssistantMessage = Extract<Message, { role: "assistant" }>;
 
-function ThinkingIndicator() {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setFrame((f) => (f + 1) % THINK_SPINNER.length), 100);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <Box paddingX={2} marginTop={1}>
-      <Text dimColor>{THINK_SPINNER[frame]} Thinking…</Text>
-    </Box>
+function appendToken(blocks: AssistantBlock[], text: string): AssistantBlock[] {
+  const last = blocks[blocks.length - 1];
+  if (last && last.kind === "text") {
+    return [...blocks.slice(0, -1), { kind: "text", text: last.text + text }];
+  }
+  return [...blocks, { kind: "text", text }];
+}
+
+function replaceTool(
+  blocks: AssistantBlock[],
+  id: string,
+  updater: (tool: ToolCallState) => ToolCallState,
+): AssistantBlock[] {
+  return blocks.map((b) =>
+    b.kind === "tool" && b.tool.id === id
+      ? { kind: "tool", tool: updater(b.tool) }
+      : b,
   );
 }
 
-export function App({ bridge, caseId }: Props) {
+export function App({ bridge, caseId, model }: Props) {
   const { exit } = useApp();
 
   const [completedMessages, setCompletedMessages] = useState<Message[]>([]);
-  const [currentAssistant, setCurrentAssistant] = useState<Message | null>(null);
+  const [currentAssistant, setCurrentAssistant] = useState<AssistantMessage | null>(null);
   const [isThinking, setIsThinking] = useState(false);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [planMode, setPlanMode] = useState(false);
 
-  const currentAssistantRef = useRef<Message | null>(null);
+  const currentAssistantRef = useRef<AssistantMessage | null>(null);
   useEffect(() => { currentAssistantRef.current = currentAssistant; }, [currentAssistant]);
 
-  const updateCurrentAssistant = useCallback((updater: (msg: Message) => Message) => {
-    setCurrentAssistant((msg) => msg ? updater(msg) : msg);
-  }, []);
+  const updateCurrentAssistant = useCallback(
+    (updater: (msg: AssistantMessage) => AssistantMessage) => {
+      setCurrentAssistant((msg) => msg ? updater(msg) : msg);
+    },
+    [],
+  );
 
   useEffect(() => {
     bridge.onEvent((ev: StreamEvent) => {
       switch (ev.type) {
         case "turn_start": {
           if (ev.turn === 1) {
-            const msg: Message = { role: "assistant", preText: "", postText: "", toolCalls: new Map() };
+            const msg: AssistantMessage = { role: "assistant", blocks: [] };
             currentAssistantRef.current = msg;
             setCurrentAssistant(msg);
           }
           break;
         }
         case "token": {
-          updateCurrentAssistant((msg) =>
-            msg.toolCalls.size === 0
-              ? { ...msg, preText: msg.preText + ev.text }
-              : { ...msg, postText: msg.postText + ev.text }
-          );
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: appendToken(msg.blocks, ev.text),
+          }));
           break;
         }
         case "tool_start": {
@@ -67,31 +83,31 @@ export function App({ bridge, caseId }: Props) {
             output: null, status: "running",
             subagentText: "", subTools: new Map(),
           };
-          updateCurrentAssistant((msg) => {
-            const toolCalls = new Map(msg.toolCalls);
-            toolCalls.set(ev.id, tool);
-            return { ...msg, toolCalls };
-          });
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: [...msg.blocks, { kind: "tool", tool }],
+          }));
           break;
         }
         case "tool_end": {
-          updateCurrentAssistant((msg) => {
-            const toolCalls = new Map(msg.toolCalls);
-            const existing = toolCalls.get(ev.id);
-            if (existing) {
-              toolCalls.set(ev.id, { ...existing, output: ev.output, status: ev.is_error ? "failed" : "done" });
-            }
-            return { ...msg, toolCalls };
-          });
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: replaceTool(msg.blocks, ev.id, (t) => ({
+              ...t,
+              output: ev.output,
+              status: ev.is_error ? "failed" : "done",
+            })),
+          }));
           break;
         }
         case "subagent_token": {
-          updateCurrentAssistant((msg) => {
-            const toolCalls = new Map(msg.toolCalls);
-            const tool = toolCalls.get(ev.tool_id);
-            if (tool) toolCalls.set(ev.tool_id, { ...tool, subagentText: tool.subagentText + ev.text });
-            return { ...msg, toolCalls };
-          });
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: replaceTool(msg.blocks, ev.tool_id, (t) => ({
+              ...t,
+              subagentText: t.subagentText + ev.text,
+            })),
+          }));
           break;
         }
         case "subagent_tool_start": {
@@ -99,39 +115,49 @@ export function App({ bridge, caseId }: Props) {
             id: ev.sub_id, name: ev.name, input: ev.input,
             output: null, status: "running", subagentText: "", subTools: new Map(),
           };
-          updateCurrentAssistant((msg) => {
-            const toolCalls = new Map(msg.toolCalls);
-            const parent = toolCalls.get(ev.tool_id);
-            if (parent) {
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => {
               const subTools = new Map(parent.subTools);
               subTools.set(ev.sub_id, subTool);
-              toolCalls.set(ev.tool_id, { ...parent, subTools });
-            }
-            return { ...msg, toolCalls };
-          });
+              return { ...parent, subTools };
+            }),
+          }));
           break;
         }
         case "subagent_tool_end": {
-          updateCurrentAssistant((msg) => {
-            const toolCalls = new Map(msg.toolCalls);
-            const parent = toolCalls.get(ev.tool_id);
-            if (parent) {
+          updateCurrentAssistant((msg) => ({
+            ...msg,
+            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => {
               const subTools = new Map(parent.subTools);
               const sub = subTools.get(ev.sub_id);
-              if (sub) subTools.set(ev.sub_id, { ...sub, output: ev.output, status: ev.is_error ? "failed" : "done" });
-              toolCalls.set(ev.tool_id, { ...parent, subTools });
-            }
-            return { ...msg, toolCalls };
-          });
+              if (sub) {
+                subTools.set(ev.sub_id, {
+                  ...sub,
+                  output: ev.output,
+                  status: ev.is_error ? "failed" : "done",
+                });
+              }
+              return { ...parent, subTools };
+            }),
+          }));
+          break;
+        }
+        case "todos_updated": {
+          setTodos(ev.todos);
           break;
         }
         case "done": {
           setIsThinking(false);
           const finished = currentAssistantRef.current;
           if (finished) {
-            let finalMsg = finished;
+            let finalMsg: AssistantMessage = finished;
             if (ev.reason !== "completed") {
-              finalMsg = { ...finished, postText: finished.postText + `\n[${ev.reason}${ev.error ? `: ${ev.error}` : ""}]` };
+              const reasonBlock: AssistantBlock = {
+                kind: "text",
+                text: `[${ev.reason}${ev.error ? `: ${ev.error}` : ""}]`,
+              };
+              finalMsg = { ...finished, blocks: [...finished.blocks, reasonBlock] };
             }
             setCompletedMessages((msgs) => [...msgs, finalMsg]);
             setCurrentAssistant(null);
@@ -146,35 +172,40 @@ export function App({ bridge, caseId }: Props) {
   }, [bridge, exit, updateCurrentAssistant]);
 
   useInput((_input, key) => {
-    if (key.ctrl && _input === "c") exit();
+    if (key.ctrl && _input === "c") process.exit(0);
+    if (key.shift && key.tab) setPlanMode((on) => !on);
   });
 
   const handleSubmit = useCallback((prompt: string) => {
-    const userMsg: Message = { role: "user", preText: prompt, postText: "", toolCalls: new Map() };
+    const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
-    bridge.send(prompt);
-  }, [bridge]);
+    bridge.send(prompt, { forceStrategy: planMode });
+  }, [bridge, planMode]);
+
+  const showWelcome =
+    completedMessages.length === 0 &&
+    currentAssistant === null &&
+    !isThinking;
 
   return (
     <Box flexDirection="column" width="100%">
-      <Header caseId={caseId} />
+      {showWelcome && <Header caseId={caseId} model={model} />}
 
-      <Static items={completedMessages}>
-        {(msg, i) =>
-          msg.role === "user"
-            ? <UserBubble key={i} text={msg.preText} />
-            : <AssistantBubble key={i} message={msg} />
-        }
-      </Static>
+      {showWelcome && <WelcomeScreen />}
+
+      {completedMessages.map((msg, i) =>
+        msg.role === "user"
+          ? <UserBubble key={i} text={msg.text} />
+          : <AssistantBubble key={i} message={msg} />
+      )}
 
       {currentAssistant && <AssistantBubble message={currentAssistant} />}
-      {isThinking && <ThinkingIndicator />}
+      {isThinking && <ThinkingSpinner />}
 
-      <PromptInput onSubmit={handleSubmit} disabled={isThinking} />
-      <Box paddingX={2}>
-        <Text dimColor>ctrl+c to quit</Text>
-      </Box>
+      <TodoPanel todos={todos} />
+      <PromptInput onSubmit={handleSubmit} disabled={isThinking} planMode={planMode} />
+      <StatusLine planMode={planMode} />
     </Box>
   );
 }

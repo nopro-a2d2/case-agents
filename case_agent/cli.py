@@ -32,39 +32,11 @@ def _ws(case_id: str, root: str) -> LocalFS:
 
 @app.command()
 def run(
-    prompt: Annotated[
-        str | None,
-        typer.Argument(help="Question or instruction. Omit to launch the chat TUI."),
-    ] = None,
+    prompt: Annotated[str, typer.Argument(help="Question or instruction.")],
     case: Annotated[str, typer.Option("--case", "-c", help="Case id (data/{case}/...)")] = "spark",
     root: Annotated[str, typer.Option("--root", help="Workspace root.")] = "data",
-    session: Annotated[
-        str | None,
-        typer.Option("--session", "-s", help="Named session (TUI mode only)."),
-    ] = None,
-    theme: Annotated[
-        str | None,
-        typer.Option(
-            "--theme",
-            help="TUI theme (e.g. textual-light, textual-dark, nord, solarized-light). "
-                 "Falls back to $CASE_AGENT_THEME, then textual-dark.",
-        ),
-    ] = None,
 ) -> None:
-    """Run the DeepAgent. With a prompt: one-shot. Without: launch the chat TUI."""
-    if prompt is None:
-        import os
-
-        from .tui import launch_chat
-
-        launch_chat(
-            case=case,
-            root=root,
-            session=session,
-            theme=theme or os.environ.get("CASE_AGENT_THEME"),
-        )
-        return
-
+    """Run a one-shot query against the DeepAgent."""
     import asyncio
 
     from .agent import build_case_agent_components
