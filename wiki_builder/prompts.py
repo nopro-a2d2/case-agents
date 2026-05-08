@@ -64,6 +64,71 @@ SOURCE_COMPILE_PROMPT = """\
   "concepts": [{{"name_ko": "개념명", "description": "설명"}}]
 }}"""
 
+# --- Cached prefix split ---
+# When Gemini explicit caching is enabled, we send SOURCE_COMPILE_RULES once
+# (cached) and only SOURCE_COMPILE_DOC_TEMPLATE.format(...) per document.
+# Both pieces remain semantically equivalent to SOURCE_COMPILE_PROMPT.
+
+SOURCE_COMPILE_RULES = """\
+다음 법률 문서를 위키 소스 페이지로 컴파일하세요.
+
+## 출력 규칙
+1. **요약** (3-5문장): 문서의 핵심 내용과 의의
+2. **핵심 사실** (구조화된 목록):
+   - dates: 모든 날짜를 YYYY.MM.DD 형식으로 (날짜, 이벤트, 페이지)
+   - amounts: 모든 금액 (금액, 맥락, 페이지)
+   - persons: 모든 인물 실명과 직책 (이름, 역할, 페이지)
+   - organizations: 모든 조직/회사 (이름, 역할, 페이지)
+   - legal_provisions: 모든 법적 조항/죄명
+3. **상세 내용** (`detailed_content`): 원문의 핵심 정보를 한 사실 단위(보통 1문장)씩
+   `{"text": "...", "pages": [N, M]}` 객체 배열로 출력하세요.
+4. **관련 엔티티**: 문서에 등장하는 주요 인물/조직/장소 목록
+5. **관련 개념**: 문서의 주요 법률 개념/사건 유형 목록
+
+## 출처 페이지 규칙 (중요)
+문서 본문은 `[페이지 N]` 마커로 페이지가 구분되어 있습니다.
+- 모든 dates/amounts/persons/organizations 항목, 그리고 detailed_content의 모든 객체에
+  해당 사실이 등장한 페이지 번호 배열 `pages`를 반드시 채워주세요 (정수만).
+- 한 사실이 여러 페이지에 걸쳐 나오면 모든 페이지 번호를 나열 (예: [3, 4]).
+- 페이지 마커가 분명하지 않은 경우에만 빈 배열 []을 허용합니다.
+- detailed_content의 `text` 필드에는 `(p.N)`, `(source-...)` 같은 출처 표기를
+  **절대 포함하지 마세요**. 페이지는 `pages` 필드로만 표현합니다.
+
+## 중요
+- 원문에 없는 정보를 추가하지 마세요 (환각 금지)
+- 날짜, 금액, 인명, 법조항은 절대 생략하지 마세요
+- 익명 인물은 익명으로 유지하세요
+
+반드시 아래 JSON 형식으로만 출력하세요:
+{
+  "summary": "요약 텍스트",
+  "key_facts": {
+    "dates": [{"date": "YYYY.MM.DD", "event": "설명", "pages": [3]}],
+    "amounts": [{"amount": "금액", "context": "맥락", "pages": [5]}],
+    "persons": [{"name": "이름", "role": "직책/역할", "pages": [1, 2]}],
+    "organizations": [{"name": "조직명", "role": "역할", "pages": [1]}],
+    "legal_provisions": ["법조항"]
+  },
+  "detailed_content": [
+    {"text": "사실1 본문", "pages": [1]},
+    {"text": "사실2 본문", "pages": [3, 4]}
+  ],
+  "entities": [{"name_ko": "이름", "type": "person|org|place|other"}],
+  "concepts": [{"name_ko": "개념명", "description": "설명"}]
+}"""
+
+SOURCE_COMPILE_DOC_TEMPLATE = """\
+## 문서 정보
+- 증거번호(ID): {doc_id}
+- 문서명: {name}
+- 카테고리: {category}
+- 관련 인물: {person}
+- 총 페이지: {total_page}
+- 토큰 수: {token_count}
+
+## 문서 전문
+{full_text}"""
+
 ENTITY_SYNTHESIS_SYSTEM = """\
 당신은 한국어 법률 사건 위키 편집자입니다.
 원시 사실 섹션(RAW)을 읽고 자연스러운 prose 로 합성합니다.

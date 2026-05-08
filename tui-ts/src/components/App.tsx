@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, useApp, useInput } from "ink";
-import type { AssistantBlock, Message, TodoItem, ToolCallState } from "../types.js";
+import type { AssistantBlock, Message, SubBlock, TodoItem, ToolCallState } from "../types.js";
 import type { PythonBridge } from "../bridge.js";
 import type { StreamEvent } from "../types.js";
 import { AssistantBubble } from "./AssistantBubble.js";
@@ -11,6 +11,8 @@ import { ThinkingSpinner } from "./ThinkingSpinner.js";
 import { StatusLine } from "./StatusLine.js";
 import { TodoPanel } from "./TodoPanel.js";
 import { WelcomeScreen } from "./WelcomeScreen.js";
+import { PlanApprovalPicker } from "./PlanApprovalPicker.js";
+import { APPROVAL_PROMPT } from "../planApproval.js";
 
 interface Props {
   bridge: PythonBridge;
@@ -40,6 +42,26 @@ function replaceTool(
   );
 }
 
+function appendSubText(blocks: SubBlock[], text: string): SubBlock[] {
+  const last = blocks[blocks.length - 1];
+  if (last && last.kind === "text") {
+    return [...blocks.slice(0, -1), { kind: "text", text: last.text + text }];
+  }
+  return [...blocks, { kind: "text", text }];
+}
+
+function updateSubTool(
+  blocks: SubBlock[],
+  subId: string,
+  updater: (tool: ToolCallState) => ToolCallState,
+): SubBlock[] {
+  return blocks.map((b) =>
+    b.kind === "tool" && b.tool.id === subId
+      ? { kind: "tool", tool: updater(b.tool) }
+      : b,
+  );
+}
+
 export function App({ bridge, caseId, model }: Props) {
   const { exit } = useApp();
 
@@ -48,6 +70,8 @@ export function App({ bridge, caseId, model }: Props) {
   const [isThinking, setIsThinking] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [planMode, setPlanMode] = useState(false);
+  const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
+  const planTurnInFlightRef = useRef(false);
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
   useEffect(() => { currentAssistantRef.current = currentAssistant; }, [currentAssistant]);
@@ -81,7 +105,8 @@ export function App({ bridge, caseId, model }: Props) {
           const tool: ToolCallState = {
             id: ev.id, name: ev.name, input: ev.input,
             output: null, status: "running",
-            subagentText: "", subTools: new Map(),
+            subBlocks: [],
+            display: ev.display ?? null,
           };
           updateCurrentAssistant((msg) => ({
             ...msg,
@@ -105,7 +130,7 @@ export function App({ bridge, caseId, model }: Props) {
             ...msg,
             blocks: replaceTool(msg.blocks, ev.tool_id, (t) => ({
               ...t,
-              subagentText: t.subagentText + ev.text,
+              subBlocks: appendSubText(t.subBlocks, ev.text),
             })),
           }));
           break;
@@ -113,33 +138,29 @@ export function App({ bridge, caseId, model }: Props) {
         case "subagent_tool_start": {
           const subTool: ToolCallState = {
             id: ev.sub_id, name: ev.name, input: ev.input,
-            output: null, status: "running", subagentText: "", subTools: new Map(),
+            output: null, status: "running", subBlocks: [],
+            display: ev.display ?? null,
           };
           updateCurrentAssistant((msg) => ({
             ...msg,
-            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => {
-              const subTools = new Map(parent.subTools);
-              subTools.set(ev.sub_id, subTool);
-              return { ...parent, subTools };
-            }),
+            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => ({
+              ...parent,
+              subBlocks: [...parent.subBlocks, { kind: "tool", tool: subTool }],
+            })),
           }));
           break;
         }
         case "subagent_tool_end": {
           updateCurrentAssistant((msg) => ({
             ...msg,
-            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => {
-              const subTools = new Map(parent.subTools);
-              const sub = subTools.get(ev.sub_id);
-              if (sub) {
-                subTools.set(ev.sub_id, {
-                  ...sub,
-                  output: ev.output,
-                  status: ev.is_error ? "failed" : "done",
-                });
-              }
-              return { ...parent, subTools };
-            }),
+            blocks: replaceTool(msg.blocks, ev.tool_id, (parent) => ({
+              ...parent,
+              subBlocks: updateSubTool(parent.subBlocks, ev.sub_id, (t) => ({
+                ...t,
+                output: ev.output,
+                status: ev.is_error ? "failed" : "done",
+              })),
+            })),
           }));
           break;
         }
@@ -163,6 +184,10 @@ export function App({ bridge, caseId, model }: Props) {
             setCurrentAssistant(null);
             currentAssistantRef.current = null;
           }
+          if (planTurnInFlightRef.current) {
+            planTurnInFlightRef.current = false;
+            if (ev.reason === "completed") setAwaitingPlanApproval(true);
+          }
           break;
         }
       }
@@ -180,8 +205,36 @@ export function App({ bridge, caseId, model }: Props) {
     const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
+    if (planMode) planTurnInFlightRef.current = true;
     bridge.send(prompt, { forceStrategy: planMode });
   }, [bridge, planMode]);
+
+  const handleAbort = useCallback(() => {
+    bridge.abort();
+  }, [bridge]);
+
+  const handleApprove = useCallback(() => {
+    setAwaitingPlanApproval(false);
+    setPlanMode(false);
+    const userMsg: Message = { role: "user", text: APPROVAL_PROMPT };
+    setCompletedMessages((msgs) => [...msgs, userMsg]);
+    setIsThinking(true);
+    planTurnInFlightRef.current = false;
+    bridge.send(APPROVAL_PROMPT, { forceStrategy: false });
+  }, [bridge]);
+
+  const handleReject = useCallback(() => {
+    setAwaitingPlanApproval(false);
+  }, []);
+
+  const handleChangePlan = useCallback((text: string) => {
+    setAwaitingPlanApproval(false);
+    const userMsg: Message = { role: "user", text };
+    setCompletedMessages((msgs) => [...msgs, userMsg]);
+    setIsThinking(true);
+    planTurnInFlightRef.current = true;
+    bridge.send(text, { forceStrategy: true });
+  }, [bridge]);
 
   const showWelcome =
     completedMessages.length === 0 &&
@@ -204,7 +257,16 @@ export function App({ bridge, caseId, model }: Props) {
       {isThinking && <ThinkingSpinner />}
 
       <TodoPanel todos={todos} />
-      <PromptInput onSubmit={handleSubmit} disabled={isThinking} planMode={planMode} />
+      {awaitingPlanApproval ? (
+        <PlanApprovalPicker
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onChange={handleChangePlan}
+          disabled={isThinking}
+        />
+      ) : (
+        <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} />
+      )}
       <StatusLine planMode={planMode} />
     </Box>
   );

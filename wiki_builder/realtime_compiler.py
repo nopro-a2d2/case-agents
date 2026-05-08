@@ -5,8 +5,10 @@ asyncio.Semaphore로 동시 호출 수를 제어하여 병렬 처리합니다.
 
 import asyncio
 import logging
+from typing import Any
 
 from google import genai
+from google.genai import types as genai_types
 
 from wiki_builder.config import wiki_settings
 from wiki_builder.llm import get_genai_client
@@ -18,10 +20,59 @@ from wiki_builder.compiler import (
     parse_compile_result,
     save_compile_cache,
 )
-from wiki_builder.prompts import SOURCE_COMPILE_PROMPT, SOURCE_COMPILE_SYSTEM
+from wiki_builder.prompts import (
+    SOURCE_COMPILE_DOC_TEMPLATE,
+    SOURCE_COMPILE_PROMPT,
+    SOURCE_COMPILE_RULES,
+    SOURCE_COMPILE_SYSTEM,
+)
 from wiki_builder.verifier import verify_compile_result
 
 logger = logging.getLogger(__name__)
+
+
+async def _create_compile_cache(client: genai.Client) -> Any | None:
+    """Create a Gemini context cache for Phase 1's static rules + system.
+
+    Returns the CachedContent object on success, ``None`` when caching is
+    disabled or the API rejects the request (e.g. token threshold not met,
+    preview model lacks support). Failures are logged at WARNING and the
+    caller falls back to the uncached path transparently.
+    """
+    if not wiki_settings.ENABLE_PROMPT_CACHING:
+        return None
+    try:
+        return await asyncio.to_thread(
+            client.caches.create,
+            model=wiki_settings.REALTIME_MODEL,
+            config=genai_types.CreateCachedContentConfig(
+                system_instruction=SOURCE_COMPILE_SYSTEM,
+                contents=[
+                    genai_types.Content(
+                        role="user",
+                        parts=[genai_types.Part.from_text(text=SOURCE_COMPILE_RULES)],
+                    )
+                ],
+                display_name="wiki-phase1-compile",
+                ttl=f"{wiki_settings.CACHE_TTL_SECONDS}s",
+            ),
+        )
+    except Exception as e:  # noqa: BLE001 — fall back to uncached path
+        logger.warning(
+            "Phase 1 cache 생성 실패, 비캐시 경로로 폴백: %s", e
+        )
+        return None
+
+
+async def _delete_cache_safe(client: genai.Client, cache: Any) -> None:
+    try:
+        await asyncio.to_thread(client.caches.delete, name=cache.name)
+    except Exception:  # noqa: BLE001 — best-effort cleanup
+        logger.warning(
+            "Phase 1 cache 삭제 실패 (TTL 만료까지 대기): name=%s",
+            getattr(cache, "name", "?"),
+            exc_info=True,
+        )
 
 
 async def compile_one(
@@ -29,8 +80,14 @@ async def compile_one(
     doc: Document,
     sem: asyncio.Semaphore,
     progress: dict,
+    prompt_cache: Any | None = None,
 ) -> tuple[str, CompileResult | None]:
-    """단일 문서 실시간 컴파일"""
+    """단일 문서 실시간 컴파일.
+
+    ``prompt_cache``가 주어지면 system_instruction + 정적 rule 블록은 캐시에서
+    재사용하고 doc 가변 부분만 전송. 미지정/None 이면 기존과 동일하게 전체
+    SOURCE_COMPILE_PROMPT 를 매 호출 보낸다.
+    """
     cache_dir = wiki_settings.CACHE_DIR
 
     # 캐시 확인 — 파싱 실패한 캐시는 즉시 삭제 후 LLM 재호출
@@ -46,15 +103,38 @@ async def compile_one(
             return doc.id, result
         delete_compile_cache(cache_dir, doc.id)
 
-    prompt = SOURCE_COMPILE_PROMPT.format(
-        doc_id=doc.id,
-        name=doc.name,
-        category=doc.category,
-        person=doc.person or "없음",
-        total_page=doc.total_page,
-        token_count=doc.token_count,
-        full_text=doc.full_text,
-    )
+    if prompt_cache is not None:
+        prompt = SOURCE_COMPILE_DOC_TEMPLATE.format(
+            doc_id=doc.id,
+            name=doc.name,
+            category=doc.category,
+            person=doc.person or "없음",
+            total_page=doc.total_page,
+            token_count=doc.token_count,
+            full_text=doc.full_text,
+        )
+        config: dict[str, Any] = {
+            "cached_content": prompt_cache.name,
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+            "response_schema": CompileResultLLM,
+        }
+    else:
+        prompt = SOURCE_COMPILE_PROMPT.format(
+            doc_id=doc.id,
+            name=doc.name,
+            category=doc.category,
+            person=doc.person or "없음",
+            total_page=doc.total_page,
+            token_count=doc.token_count,
+            full_text=doc.full_text,
+        )
+        config = {
+            "system_instruction": SOURCE_COMPILE_SYSTEM,
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+            "response_schema": CompileResultLLM,
+        }
 
     async with sem:
         try:
@@ -62,12 +142,7 @@ async def compile_one(
                 client.models.generate_content,
                 model=wiki_settings.REALTIME_MODEL,
                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
-                config={
-                    "system_instruction": SOURCE_COMPILE_SYSTEM,
-                    "temperature": 0.1,
-                    "response_mime_type": "application/json",
-                    "response_schema": CompileResultLLM,
-                },
+                config=config,
             )
 
             raw_text = response.text or ""
@@ -152,8 +227,23 @@ async def run_phase1_realtime(
 
     logger.info("Phase 1 실시간 컴파일 시작: %d개 문서, 동시성 %d", len(docs), concurrency)
 
-    tasks = [compile_one(client, doc, sem, progress) for doc in docs]
-    results_list = await asyncio.gather(*tasks)
+    prompt_cache = await _create_compile_cache(client)
+    if prompt_cache is not None:
+        logger.info(
+            "Phase 1 prompt cache 활성: name=%s ttl=%ds",
+            prompt_cache.name,
+            wiki_settings.CACHE_TTL_SECONDS,
+        )
+
+    try:
+        tasks = [
+            compile_one(client, doc, sem, progress, prompt_cache=prompt_cache)
+            for doc in docs
+        ]
+        results_list = await asyncio.gather(*tasks)
+    finally:
+        if prompt_cache is not None:
+            await _delete_cache_safe(client, prompt_cache)
 
     results = {}
     for doc_id, result in results_list:

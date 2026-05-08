@@ -20,6 +20,7 @@ from .tools.agent_tools import (
     build_read_with_anchor_tool,
     build_smart_search_tool,
     build_verify_citations_tool,
+    build_write_file_tool,
 )
 from .tools.memory import build_memory_tools
 from .tools.strategy import build_strategy_tools
@@ -82,6 +83,7 @@ def build_case_agent_components(
         build_verify_citations_tool(workspace),
         build_check_completeness_tool(workspace),
         build_calculate_tool(),
+        build_write_file_tool(workspace),
     ]
     case_tools.extend(build_memory_tools(workspace))
     case_tools.extend(build_strategy_tools(workspace))

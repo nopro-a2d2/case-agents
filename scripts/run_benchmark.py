@@ -47,11 +47,18 @@ def _model_name(model: object) -> str:
     return type(model).__name__
 
 
-def _run_agent(query: str, components) -> str:
+def _run_agent(
+    query: str,
+    components,
+    session_id: str | None = None,
+    tags: list[str] | None = None,
+) -> str:
     """ThreadPoolExecutor 스레드 안에서 async agent 를 실행."""
     from case_agent.loop.runner import run_query_oneshot
 
-    return asyncio.run(run_query_oneshot(query, components))
+    return asyncio.run(
+        run_query_oneshot(query, components, session_id=session_id, tags=tags)
+    )
 
 
 def main() -> int:
@@ -169,7 +176,13 @@ def main() -> int:
         or (case_path / "eval-output" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
     )
     out_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("결과 저장 위치: %s (resume=%s)", out_dir, bool(args.resume))
+    # Reuse the out_dir name as the Langfuse session_id so --resume continues
+    # the same session instead of forking a new one.
+    bench_session_id = f"bench-{out_dir.name}"
+    logger.info(
+        "결과 저장 위치: %s (resume=%s) langfuse_session=%s",
+        out_dir, bool(args.resume), bench_session_id,
+    )
 
     results_jsonl = out_dir / "results.jsonl"
     results: list[dict] = []
@@ -202,7 +215,13 @@ def main() -> int:
             answer = ""
             error: str | None = None
             try:
-                future = executor.submit(_run_agent, q["query"], components)
+                future = executor.submit(
+                    _run_agent,
+                    q["query"],
+                    components,
+                    bench_session_id,
+                    ["benchmark", q["category"]],
+                )
                 answer = future.result(timeout=args.per_query_timeout)
             except cf.TimeoutError:
                 error = f"timeout(>{args.per_query_timeout:.0f}s)"

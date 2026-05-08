@@ -45,6 +45,10 @@ export class PythonBridge {
     this.proc.stdin!.write(JSON.stringify(payload) + "\n");
   }
 
+  abort(): void {
+    this.proc.stdin!.write(JSON.stringify({ type: "abort" }) + "\n");
+  }
+
   kill(): void {
     this.proc.kill();
   }

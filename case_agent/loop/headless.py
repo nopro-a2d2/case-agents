@@ -1,7 +1,9 @@
 """Headless stdio loop — reads prompts from stdin, writes StreamEvents as NDJSON to stdout.
 
 Protocol:
-  stdin:  one JSON line per user turn  {"prompt": "..."}
+  stdin:  one JSON line per frame
+            {"prompt": "...", "force_strategy": false}   # start a turn
+            {"type": "abort"}                            # cancel running turn
   stdout: one JSON line per StreamEvent (NDJSON)
   stderr: Python tracebacks / logs (forwarded to terminal)
 """
@@ -11,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import uuid
 from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -35,7 +38,13 @@ def _serialize(ev: Any) -> dict:
     if isinstance(ev, TextDelta):
         return {"type": "token", "text": ev.text}
     if isinstance(ev, ToolStart):
-        return {"type": "tool_start", "id": ev.id, "name": ev.name, "input": ev.input}
+        return {
+            "type": "tool_start",
+            "id": ev.id,
+            "name": ev.name,
+            "input": ev.input,
+            "display": ev.display,
+        }
     if isinstance(ev, ToolEnd):
         return {"type": "tool_end", "id": ev.id, "output": ev.output, "is_error": ev.is_error}
     if isinstance(ev, SubagentTextDelta):
@@ -47,6 +56,7 @@ def _serialize(ev: Any) -> dict:
             "sub_id": ev.sub_id,
             "name": ev.name,
             "input": ev.input,
+            "display": ev.display,
         }
     if isinstance(ev, SubagentToolEnd):
         return {
@@ -76,17 +86,61 @@ def _emit(ev: Any) -> None:
         print(json.dumps({"type": "error", "error": str(e)}), flush=True)
 
 
+async def _connect_stdin() -> asyncio.StreamReader:
+    """Wrap sys.stdin in an async StreamReader so we can await lines while
+    a turn is running concurrently."""
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    protocol = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+    return reader
+
+
 async def headless_loop(case: str, root: str) -> None:
     """Run the agent loop in headless mode, bridging stdin/stdout."""
     from ..agent import build_case_agent_components
+    from ..observability import flush as _obs_flush
     from ..workspace import LocalFS
 
     ws = LocalFS(case_id=case, root=root)
     components = build_case_agent_components(ws)
     history: list[BaseMessage] = []
 
-    for raw in sys.stdin:
-        raw = raw.strip()
+    # One Langfuse session per stdio process — all turns roll up under it.
+    chat_session_id = f"headless-{uuid.uuid4().hex[:12]}"
+    print(
+        f"[case-agent] langfuse session_id={chat_session_id}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+    abort_event = asyncio.Event()
+    run_task: asyncio.Task[None] | None = None
+
+    async def run_turn(prompt: str, force_strategy: bool, abort: asyncio.Event) -> None:
+        nonlocal history
+        history.append(HumanMessage(content=prompt))
+        async for ev in stream_query(
+            prompt,
+            components,
+            messages=history,
+            abort=abort,
+            force_strategy=force_strategy,
+            session_id=chat_session_id,
+        ):
+            _emit(ev)
+            if isinstance(ev, Done):
+                if ev.terminal.messages:
+                    history = list(ev.terminal.messages)
+                # Long-lived process: flush per turn so SIGINT can't lose data.
+                _obs_flush()
+
+    reader = await _connect_stdin()
+    while True:
+        line = await reader.readline()
+        if not line:
+            break  # EOF — parent closed stdin
+        raw = line.decode(errors="replace").strip()
         if not raw:
             continue
         try:
@@ -95,21 +149,34 @@ async def headless_loop(case: str, root: str) -> None:
             print(json.dumps({"type": "error", "error": f"invalid json: {e}"}), flush=True)
             continue
 
+        # Abort frame — signal the in-flight turn (if any).
+        if payload.get("type") == "abort":
+            abort_event.set()
+            continue
+
         prompt: str = payload.get("prompt", "")
         force_strategy: bool = bool(payload.get("force_strategy", False))
         if not prompt:
             continue
 
-        history.append(HumanMessage(content=prompt))
-        async for ev in stream_query(
-            prompt,
-            components,
-            messages=history,
-            force_strategy=force_strategy,
-        ):
-            _emit(ev)
-            if isinstance(ev, Done) and ev.terminal.messages:
-                history = list(ev.terminal.messages)
+        # Drop overlapping prompts — same policy as ws_server.
+        if run_task and not run_task.done():
+            print(
+                json.dumps({"type": "error", "error": "turn in progress"}),
+                flush=True,
+            )
+            continue
+
+        abort_event = asyncio.Event()
+        run_task = asyncio.create_task(run_turn(prompt, force_strategy, abort_event))
+
+    # On EOF, wait for any in-flight turn to wind down so we don't truncate output.
+    if run_task and not run_task.done():
+        abort_event.set()
+        try:
+            await run_task
+        except Exception:  # noqa: BLE001
+            pass
 
 
 __all__ = ["headless_loop"]

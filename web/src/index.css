@@ -61,3 +61,12 @@ body {
   background: currentColor;
   animation: cursor-blink 1s step-end infinite;
 }
+
+/* Tool bubble: slow pulse while running, steady when done/failed. */
+@keyframes tool-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.tool-running {
+  animation: tool-pulse 1.6s ease-in-out infinite;
+}

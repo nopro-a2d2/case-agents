@@ -28,24 +28,9 @@ function fmtInput(input: unknown): string {
   return String(input).slice(0, truncate.toolArgs);
 }
 
-function fmtOutput(v: unknown): string {
-  let s: string;
-  if (typeof v === "string") s = v.trim();
-  else { try { s = JSON.stringify(v); } catch { s = String(v); } }
-  const first = s.split("\n")[0] ?? "";
-  return first.length > truncate.toolResult
-    ? first.slice(0, truncate.toolResult) + glyphs.ellipsis
-    : first;
-}
-
-function clampLine(line: string): string {
-  return line.length > truncate.subagentLineWidth
-    ? line.slice(0, truncate.subagentLineWidth) + glyphs.ellipsis
-    : line;
-}
-
 export function ToolBlock({ tool, indent = 0 }: Props) {
   const [frame, setFrame] = useState(0);
+  const [pulse, setPulse] = useState(false);
 
   useEffect(() => {
     if (tool.status !== "running") return;
@@ -56,59 +41,61 @@ export function ToolBlock({ tool, indent = 0 }: Props) {
     return () => clearInterval(t);
   }, [tool.status]);
 
+  // Slow pulse while running — Ink has no opacity, so we toggle dimColor.
+  useEffect(() => {
+    if (tool.status !== "running") {
+      setPulse(false);
+      return;
+    }
+    const t = setInterval(() => setPulse((p) => !p), 800);
+    return () => clearInterval(t);
+  }, [tool.status]);
+
   const running = tool.status === "running";
   const failed  = tool.status === "failed";
   const done    = tool.status === "done";
   const inputStr = fmtInput(tool.input);
-
-  const subagentTail = running
-    ? tool.subagentText
-        .split("\n")
-        .filter(Boolean)
-        .slice(-truncate.subagentTailLines)
-        .map(clampLine)
-        .join("\n")
-    : "";
+  const display  = tool.display;
+  const headerColor = failed ? colors.error : done ? colors.success : undefined;
+  const headerDim = running && pulse;
 
   return (
     <Box flexDirection="column" marginLeft={indent * spacing.sm}>
       {/* Tool header line: spinner/bullet + name + input hint */}
       <Box>
         {running
-          ? <Text dimColor>{glyphs.spinnerFrames[frame]} </Text>
-          : <Text color={failed ? colors.error : colors.success}>{failed ? glyphs.bulletFailed : glyphs.bulletDone} </Text>
+          ? <Text dimColor={headerDim}>{glyphs.spinnerFrames[frame]} </Text>
+          : <Text color={headerColor}>{failed ? glyphs.bulletFailed : glyphs.bulletDone} </Text>
         }
-        <Text dimColor={running} color={failed ? colors.error : undefined}>
-          {tool.name}
-        </Text>
-        {inputStr !== "" && <Text dimColor> {inputStr}</Text>}
+        {display ? (
+          <>
+            <Text dimColor={headerDim} color={headerColor}>
+              {display.action}
+            </Text>
+            <Text dimColor> - {display.subject}</Text>
+          </>
+        ) : (
+          <>
+            <Text dimColor={headerDim} color={headerColor}>
+              {tool.name}
+            </Text>
+            {inputStr !== "" && <Text dimColor> {inputStr}</Text>}
+          </>
+        )}
         {failed && <Text color={colors.error}> · error</Text>}
       </Box>
 
-      {/* Subagent streaming text (last few lines while running) */}
-      {subagentTail !== "" && (
-        <Box marginLeft={spacing.sm}>
-          <Text dimColor>{subagentTail}</Text>
-        </Box>
-      )}
-
-      {/* Nested sub-tools */}
-      {Array.from(tool.subTools.values()).map((sub) => (
-        <ToolBlock key={sub.id} tool={sub} indent={indent + 1} />
-      ))}
-
-      {/* Result line with tree connector */}
-      {done && (
-        <Box marginLeft={spacing.sm}>
-          <Text dimColor>{glyphs.treeConnector} </Text>
-          <Text dimColor>{tool.output != null ? fmtOutput(tool.output) : "Done"}</Text>
-        </Box>
-      )}
-      {failed && tool.output != null && (
-        <Box marginLeft={spacing.sm}>
-          <Text dimColor>{glyphs.treeConnector} </Text>
-          <Text color={colors.error}>{fmtOutput(tool.output)}</Text>
-        </Box>
+      {/* Subagent's interleaved text + sub-tools (main-agent-style streaming) */}
+      {tool.subBlocks.map((blk, i) =>
+        blk.kind === "text" ? (
+          blk.text === "" ? null : (
+            <Box key={i} marginLeft={spacing.sm}>
+              <Text>{blk.text}</Text>
+            </Box>
+          )
+        ) : (
+          <ToolBlock key={i} tool={blk.tool} indent={indent + 1} />
+        ),
       )}
     </Box>
   );

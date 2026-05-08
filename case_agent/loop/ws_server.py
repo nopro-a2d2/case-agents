@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -23,6 +24,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from ..observability import flush as _obs_flush
 from .headless import _serialize
 from .runner import stream_query
 from .types import Done
@@ -57,6 +59,10 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
         components = build_case_agent_components(workspace)
         history: list[BaseMessage] = []
 
+        # One Langfuse session per WS connection — every turn in this
+        # browser tab rolls up under it.
+        chat_session_id = f"ws-{uuid.uuid4().hex[:12]}"
+
         abort_event = asyncio.Event()
         run_task: asyncio.Task[None] | None = None
 
@@ -75,6 +81,7 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                     messages=history,
                     abort=abort_event,
                     force_strategy=force_strategy,
+                    session_id=chat_session_id,
                 ):
                     event_count += 1
                     payload = _serialize(ev)
@@ -83,8 +90,11 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                     await ws.send_text(
                         json.dumps(payload, ensure_ascii=False, default=str)
                     )
-                    if isinstance(ev, Done) and ev.terminal.messages:
-                        history = list(ev.terminal.messages)
+                    if isinstance(ev, Done):
+                        if ev.terminal.messages:
+                            history = list(ev.terminal.messages)
+                        # Long-lived process: flush per turn.
+                        _obs_flush()
                 logger.info("ws turn finished events=%d", event_count)
             except Exception as e:  # noqa: BLE001 — surface to client as JSON
                 logger.exception("ws turn failed after %d events", event_count)
@@ -95,7 +105,10 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                 except Exception:  # noqa: BLE001
                     pass
 
-        logger.info("ws connection open case=%s root=%s", case, root)
+        logger.info(
+            "ws connection open case=%s root=%s langfuse_session=%s",
+            case, root, chat_session_id,
+        )
         try:
             while True:
                 raw = await ws.receive_text()

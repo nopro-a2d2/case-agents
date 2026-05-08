@@ -35,6 +35,13 @@ def run(
     prompt: Annotated[str, typer.Argument(help="Question or instruction.")],
     case: Annotated[str, typer.Option("--case", "-c", help="Case id (data/{case}/...)")] = "spark",
     root: Annotated[str, typer.Option("--root", help="Workspace root.")] = "data",
+    session_id: Annotated[
+        str | None,
+        typer.Option(
+            "--session-id",
+            help="Optional Langfuse session_id to group this run with others.",
+        ),
+    ] = None,
 ) -> None:
     """Run a one-shot query against the DeepAgent."""
     import asyncio
@@ -45,7 +52,9 @@ def run(
     ws = _ws(case, root)
     console.print(Panel(f"case={ws.case_id}  root={ws.case_root}", title="case-agent"))
     components = build_case_agent_components(ws)
-    text = asyncio.run(run_query_oneshot(prompt, components))
+    text = asyncio.run(
+        run_query_oneshot(prompt, components, session_id=session_id)
+    )
     console.print(Panel(text or "(empty reply)", title="reply"))
 
 

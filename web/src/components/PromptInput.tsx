@@ -43,6 +43,9 @@ export function PromptInput({
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
+      // IME 조합 확정용 Enter는 브라우저에 양보. 그러지 않으면 조합 확정 후
+      // 따라오는 input 이벤트가 setValue로 텍스트를 다시 채워 입력창에 잔존.
+      if (e.nativeEvent.isComposing) return;
       e.preventDefault();
       if (disabled) return;
       const trimmed = value.trim();

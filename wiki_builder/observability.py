@@ -1,18 +1,24 @@
-"""Langfuse 관찰성 연동 (v4 API)"""
+"""Langfuse 관찰성 연동 (v4 API).
+
+Langfuse 클라이언트와 LangChain ``CallbackHandler`` 의 단일 진실은
+:mod:`case_agent.observability` 가 보유한다. 이 모듈은 wiki_builder
+전용 헬퍼(``log_generation``, ``log_batch_job``, ``get_session_id``,
+``get_token_stats``)만 추가로 제공한다.
+"""
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from case_agent.observability import (
+    flush as _shared_flush,
+    get_langchain_callback as _shared_get_callback,
+    get_langfuse as _shared_get_langfuse,
+)
 from wiki_builder.config import wiki_settings
-
-if TYPE_CHECKING:
-    from langfuse import Langfuse
 
 logger = logging.getLogger(__name__)
 
-_langfuse: "Langfuse | None" = None
-_langchain_handler: Any | None = None  # CallbackHandler — lazy import 로 v4 의존성 격리
 _session_id: str = f"llm-wiki-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 # 누적 토큰 카운터
@@ -21,60 +27,32 @@ _total_output_tokens: int = 0
 _total_calls: int = 0
 
 
-def get_langfuse() -> Any:
-    global _langfuse
-    if not wiki_settings.LANGFUSE_ENABLED:
-        return None
-    if _langfuse is None:
-        try:
-            from langfuse import Langfuse
-            _langfuse = Langfuse(
-                public_key=wiki_settings.LANGFUSE_PUBLIC_KEY,
-                secret_key=wiki_settings.LANGFUSE_SECRET_KEY,
-                host=wiki_settings.LANGFUSE_BASE_URL,
-            )
-            _langfuse.auth_check()
-            logger.info("Langfuse 연결 완료: %s", wiki_settings.LANGFUSE_BASE_URL)
-        except Exception:
-            logger.warning("Langfuse 연결 실패", exc_info=True)
-            _langfuse = None
-            return None
-    return _langfuse
+def get_langfuse() -> Any | None:
+    """Shared Langfuse client (env-driven)."""
+    return _shared_get_langfuse()
 
 
 def get_session_id() -> str:
     return _session_id
 
 
+def set_session_id(case_name: str) -> None:
+    """사건 이름 기반으로 session_id 재설정.
+
+    엔트리포인트(``__main__.py``) 가 ``apply_case_path()`` 직후 호출.
+    미호출 시 import 시점의 폴백(``llm-wiki-{timestamp}``) 이 유지된다.
+    """
+    global _session_id
+    _session_id = f"{case_name}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+
 def get_langchain_callback() -> Any | None:
-    """Langfuse v4 LangChain ``CallbackHandler`` 의 process singleton.
+    """Shared LangChain ``CallbackHandler`` singleton.
 
     deepagents/LangGraph ``agent.invoke(config={"callbacks": [...]})`` 에 주입하면
     노드 / 도구 / sub-agent / LLM 호출이 자동 트레이스된다.
-    ``LANGFUSE_ENABLED=False`` 또는 SDK / client 초기화 실패 시 ``None`` 반환 —
-    호출자는 ``None`` 이면 callback 키 자체를 omit 해 zero overhead 유지.
     """
-    global _langchain_handler
-    if not wiki_settings.LANGFUSE_ENABLED:
-        return None
-    if _langchain_handler is not None:
-        return _langchain_handler
-    # ambient client (get_client()) 가 CallbackHandler 인스턴스 생성에 필요.
-    if get_langfuse() is None:
-        return None
-    try:
-        from langfuse.langchain import CallbackHandler
-    except ImportError:
-        logger.warning(
-            "Langfuse LangChain integration import 실패 — `langfuse[langchain]` 설치 필요"
-        )
-        return None
-    try:
-        _langchain_handler = CallbackHandler()
-    except Exception:
-        logger.warning("Langfuse CallbackHandler 생성 실패", exc_info=True)
-        return None
-    return _langchain_handler
+    return _shared_get_callback()
 
 
 def log_generation(
@@ -161,7 +139,5 @@ def get_token_stats() -> dict:
 
 
 def flush() -> None:
-    """Langfuse 버퍼 플러시"""
-    lf = get_langfuse()
-    if lf:
-        lf.flush()
+    """Langfuse 버퍼 플러시 (shared client)"""
+    _shared_flush()

@@ -57,6 +57,37 @@ def test_read_with_anchor_bad_anchor_raises() -> None:
         read_with_anchor(ws, "json/1.json#p99999")
 
 
+def test_read_with_anchor_page_range() -> None:
+    ws = _ws()
+    r = read_with_anchor(ws, "json/1.json#p1..2")
+    assert r.kind == "page"
+    assert "--- p1 ---" in r.snippet
+    assert "--- p2 ---" in r.snippet
+    assert r.citation == "json/1.json#p1..2"
+
+
+def test_read_with_anchor_page_range_single_normalized() -> None:
+    ws = _ws()
+    r = read_with_anchor(ws, "json/1.json#p1..1")
+    assert r.kind == "page"
+    # canonical citation collapses pA..A → pA
+    assert r.citation == "json/1.json#p1"
+
+
+def test_read_with_anchor_legacy_dash_range_rejected() -> None:
+    """`p1-5` is not the supported grammar — must raise with a hint."""
+    ws = _ws()
+    with pytest.raises(ValueError) as excinfo:
+        read_with_anchor(ws, "json/1.json#p1-5")
+    assert "pA..B" in str(excinfo.value)
+
+
+def test_read_with_anchor_page_range_not_found() -> None:
+    ws = _ws()
+    with pytest.raises(ValueError):
+        read_with_anchor(ws, "json/1.json#p9000..9001")
+
+
 def test_list_evidence_smoke() -> None:
     ws = _ws()
     items = list_evidence(ws, limit=5)

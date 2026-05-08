@@ -1,18 +1,27 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors, glyphs, spacing } from "../theme.js";
 
 interface Props {
   onSubmit: (value: string) => void;
+  onAbort?: () => void;
   disabled?: boolean;
   planMode?: boolean;
 }
 
-export function PromptInput({ onSubmit, disabled = false, planMode = false }: Props) {
+export function PromptInput({ onSubmit, onAbort, disabled = false, planMode = false }: Props) {
   const [value, setValue] = useState("");
 
+  // 부모가 turn을 시작(disabled=true)하면 stdin race와 무관하게 입력창을 강제로 비운다.
+  useEffect(() => {
+    if (disabled) setValue("");
+  }, [disabled]);
+
   useInput((input, key) => {
-    if (disabled) return;
+    if (disabled) {
+      if (key.escape) onAbort?.();
+      return;
+    }
     if (key.return) {
       const trimmed = value.trim();
       if (trimmed) { setValue(""); onSubmit(trimmed); }

@@ -75,7 +75,12 @@ def build_read_with_anchor_tool(workspace: Workspace):
 
         Citation grammar: `path#anchor` where anchor is one of:
           - `Lstart-Lend`   line range, 1-based (txt files)
-          - `pN`            page number      (json source files)
+          - `pN`            single page              (json source files)
+          - `pA..B`         inclusive page range    (json source files)
+                            e.g. `json/1.json#p1..5` reads pages 1–5 in one call.
+                            한 번에 여러 페이지를 가져와 토큰을 절약하세요.
+                            범위 구분자는 반드시 `..` 입니다 (`p1-5` ❌, `p1..5` ✅).
+                            반환 스니펫에는 페이지 경계마다 `--- pN ---` 마커가 들어갑니다.
           - `sec:slug`      heading slug     (markdown wiki files)
 
         Returns JSON with the (canonical) `citation`, the `snippet` text, and `kind`.
@@ -99,7 +104,7 @@ def build_list_evidence_tool(workspace: Workspace):
         """Enumerate evidence (json/) with optional filters.
 
         Each item gives the source_id, title, category, person, page count, the
-        json_path you can `read_with_anchor` against (with `pN` anchors), and the
+        json_path you can `read_with_anchor` against (with `pN` or `pA..B` anchors), and the
         wiki_path of its summary md if available. Useful when the user references
         an evidence number or wants a specific class of documents.
         """
@@ -162,8 +167,31 @@ def build_calculate_tool() -> CalculateTool:
     return CalculateTool()
 
 
+def build_write_file_tool(workspace: Workspace):
+    @tool
+    def write_file(path: str, content: str) -> str:
+        """Write ``content`` to a workspace-relative ``path`` (overwrite if exists).
+
+        쓰기 가능 디렉토리: ``artifacts/``, ``audit/``, ``plans/``, ``memory/``,
+        ``state/``, (legacy) ``drafts/``, ``notes/``. ``MEMORY.md`` 는 루트 허용.
+        ``wiki-output/``, ``cache/``, ``json/``, ``sources/``, ``txt/`` 는 read-only —
+        쓰기 시 에러를 반환합니다.
+
+        Args:
+            path: workspace-root-relative path, e.g. ``artifacts/timeline_v1.md``.
+            content: full file contents (UTF-8 text). Existing file is overwritten.
+
+        Returns:
+            ``"wrote {path}"`` on success.
+        """
+        workspace.write(path, content)
+        return f"wrote {path}"
+
+    return write_file
+
+
 def build_case_tools(workspace: Workspace, embedder: Embedder) -> list[Any]:
-    """Convenience: every case-aware tool, ready to hand to create_deep_agent."""
+    """Convenience: every case-aware tool."""
     return [
         build_smart_search_tool(workspace, embedder),
         build_read_with_anchor_tool(workspace),
@@ -171,4 +199,5 @@ def build_case_tools(workspace: Workspace, embedder: Embedder) -> list[Any]:
         build_verify_citations_tool(workspace),
         build_check_completeness_tool(workspace),
         build_calculate_tool(),
+        build_write_file_tool(workspace),
     ]

@@ -176,6 +176,9 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
+obs = [
+    { name = "langfuse" },
+]
 s3 = [
     { name = "boto3" },
 ]
@@ -201,6 +204,7 @@ requires-dist = [
     { name = "langchain-anthropic", specifier = ">=0.3.0" },
     { name = "langchain-google-genai", specifier = ">=2.0" },
     { name = "langchain-google-vertexai", specifier = ">=2.0.0" },
+    { name = "langfuse", marker = "extra == 'obs'", specifier = ">=4.0.1" },
     { name = "langfuse", marker = "extra == 'wiki'", specifier = ">=4.0.1" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0" },
@@ -216,7 +220,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.32" },
 ]
-provides-extras = ["s3", "wiki", "web", "dev"]
+provides-extras = ["s3", "obs", "wiki", "web", "dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.15.12" }]

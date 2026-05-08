@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from langchain_core.messages import (
     AIMessage,
@@ -29,6 +29,13 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+
+try:
+    from langchain_google_vertexai.model_garden import (
+        ChatAnthropicVertex as _ChatAnthropicVertex,
+    )
+except ImportError:  # pragma: no cover — minimal test env
+    _ChatAnthropicVertex = None  # type: ignore[assignment]
 
 from .types import (
     Done,
@@ -55,6 +62,42 @@ if TYPE_CHECKING:
 DEFAULT_MAX_TURNS = 25
 
 
+def _build_system_message(
+    model: "BaseChatModel",
+    base_prompt: str,
+    extra: str | None = None,
+) -> SystemMessage:
+    """Build the leading SystemMessage for the loop.
+
+    For Anthropic (Claude) models we emit a structured-block content with a
+    ``cache_control`` marker on the static base prompt, enabling 5-minute
+    ephemeral prompt caching across turns. ``extra`` (e.g. the strategy
+    reminder) is sent as a separate, uncached block so it can change per turn
+    without invalidating the prefix cache.
+
+    For non-Anthropic models we emit plain text — the providers' own implicit
+    caching applies, and stub models in tests keep their simple ``str``
+    contract.
+    """
+    is_anthropic = (
+        _ChatAnthropicVertex is not None
+        and isinstance(model, _ChatAnthropicVertex)
+    )
+    if not is_anthropic:
+        text = f"{base_prompt}\n\n{extra}" if extra else base_prompt
+        return SystemMessage(content=text)
+    blocks: list[dict] = [
+        {
+            "type": "text",
+            "text": base_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    if extra:
+        blocks.append({"type": "text", "text": extra})
+    return SystemMessage(content=blocks)
+
+
 async def query(
     *,
     messages: Sequence[BaseMessage],
@@ -65,6 +108,10 @@ async def query(
     abort: asyncio.Event | None = None,
     stream_timeout: float | None = None,
     todos_store: "TodoStore | None" = None,
+    callbacks: list | None = None,
+    metadata: dict | None = None,
+    system_extra: str | None = None,
+    display_label_fn: Callable[[str, dict], "dict | None"] | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Run the LLM↔Tool loop until end_turn, max_turns, or abort.
 
@@ -76,14 +123,31 @@ async def query(
         model: a ``BaseChatModel`` supporting ``bind_tools`` + ``astream``.
         max_turns: hard upper bound on iterations (claude-code's turnCount cap).
         abort: optional asyncio Event; checked at the top of every turn.
+        callbacks: optional LangChain callback list (e.g. Langfuse handler).
+            When non-empty, threaded into ``model.astream`` and ``tool.ainvoke``
+            via ``RunnableConfig`` so observability spans nest automatically.
 
     Yields:
         ``StreamEvent``s in order: TurnStart → TextDelta* → ToolStart/ToolEnd*
         → ... → Done. ``Done`` is always the last event.
     """
-    state: list[BaseMessage] = [SystemMessage(content=system_prompt), *messages]
+    state: list[BaseMessage] = [
+        _build_system_message(model, system_prompt, system_extra),
+        *messages,
+    ]
     model_with_tools = model.bind_tools(tools) if tools else model
     tools_by_name = {t.name: t for t in tools}
+
+    # Only build a config dict when we actually have callbacks or metadata —
+    # keeps the call signature unchanged for existing stub models in tests.
+    run_config: dict | None = None
+    if callbacks or metadata:
+        run_config = {}
+        if callbacks:
+            run_config["callbacks"] = callbacks
+        if metadata:
+            run_config["metadata"] = metadata
+    stream_kwargs = {"config": run_config} if run_config else {}
 
     for turn in range(1, max_turns + 1):
         if abort is not None and abort.is_set():
@@ -97,7 +161,7 @@ async def query(
         try:
             cm = asyncio.timeout(stream_timeout) if stream_timeout is not None else contextlib.nullcontext()
             async with cm:
-                async for chunk in model_with_tools.astream(state):
+                async for chunk in model_with_tools.astream(state, **stream_kwargs):
                     if not isinstance(chunk, AIMessageChunk):
                         # Some adapters yield a final AIMessage as the last chunk;
                         # cast to chunk so the fold stays homogeneous.
@@ -138,7 +202,13 @@ async def query(
             tc_id = tc.get("id") or str(uuid.uuid4())
             tc_name = tc.get("name") or ""
             tc_args = tc.get("args") or {}
-            yield ToolStart(tc_id, tc_name, dict(tc_args))
+            display = None
+            if display_label_fn is not None:
+                try:
+                    display = display_label_fn(tc_name, dict(tc_args))
+                except Exception:
+                    display = None
+            yield ToolStart(tc_id, tc_name, dict(tc_args), display)
 
             tool = tools_by_name.get(tc_name)
             if tool is None:
@@ -152,12 +222,21 @@ async def query(
             try:
                 if hasattr(tool, "_arun_streaming"):
                     # StreamingTaskTool: bubble subagent events up to the TUI.
+                    # Forward callbacks so the sub-agent's spans nest under
+                    # this trace.
                     output = ""
-                    async for sub_ev in tool._arun_streaming(**tc_args):
+                    async for sub_ev in tool._arun_streaming(
+                        **tc_args,
+                        _callbacks=callbacks,
+                        _metadata=metadata,
+                        _display_label_fn=display_label_fn,
+                    ):
                         if isinstance(sub_ev, TextDelta) and sub_ev.text:
                             yield SubagentTextDelta(tc_id, sub_ev.text)
                         elif isinstance(sub_ev, ToolStart):
-                            yield SubagentToolStart(tc_id, sub_ev.id, sub_ev.name, sub_ev.input)
+                            yield SubagentToolStart(
+                                tc_id, sub_ev.id, sub_ev.name, sub_ev.input, sub_ev.display
+                            )
                         elif isinstance(sub_ev, ToolEnd):
                             yield SubagentToolEnd(tc_id, sub_ev.id, sub_ev.output, sub_ev.is_error)
                         elif isinstance(sub_ev, Done):
@@ -167,7 +246,10 @@ async def query(
                             elif sub_ev.terminal.reason != "completed":
                                 output = f"subagent stopped: reason={sub_ev.terminal.reason}"
                 else:
-                    output = await tool.ainvoke(tc_args)
+                    if run_config is not None:
+                        output = await tool.ainvoke(tc_args, config=run_config)
+                    else:
+                        output = await tool.ainvoke(tc_args)
                 state.append(
                     ToolMessage(
                         content=_stringify_tool_output(output),

@@ -70,15 +70,18 @@ def build_write_todos_tool(store: TodoStore):
         Statuses: ``pending`` (not started) · ``in_progress`` (active) ·
         ``completed`` (done).
 
-        WHEN to use:
-          - 작업이 ≥3 단계로 분해될 때 시작 시 한 번 호출.
-          - 단계가 끝날 때마다 곧바로 ``completed`` 로 갱신하고 다음 단계를
-            ``in_progress`` 로 표시.
+        WHEN to use (의무):
+          - 작업이 **≥2 단계** 로 분해되면 답변 전에 반드시 한 번 호출.
+          - 각 단계 종료 시 즉시 다시 호출하여 status 갱신
+            (끝난 것 → ``completed``, 다음 것 → ``in_progress``).
           - ``in_progress`` 는 한 번에 **하나만** 유지.
+          - 검증 실패로 보강이 필요하면 새 todo 추가.
+          - 모든 항목이 ``completed`` 가 된 뒤에 사용자에게 최종 답변.
 
-        WHEN NOT to use:
-          - 단일 사실 질의·한 줄 수정처럼 단계가 1개인 작업.
-          - 동일한 리스트를 의미 없이 다시 쓰기.
+        WHEN NOT to use (예외):
+          - 한 줄 사실 질의("피고인이 누구야?", "공소제기일") 처럼
+            ``smart_search`` 1회로 끝나는 1단계 작업.
+          - 의미 없는 동일 리스트 재기록.
 
         Returns JSON ``{"ok": true, "count": N}``.
         """

@@ -29,24 +29,6 @@ function fmtInput(input: unknown): string {
   return String(input).slice(0, TRUNCATE.toolArgs);
 }
 
-function fmtOutput(v: unknown): string {
-  let s: string;
-  if (typeof v === "string") s = v.trim();
-  else {
-    try { s = JSON.stringify(v); } catch { s = String(v); }
-  }
-  const first = s.split("\n")[0] ?? "";
-  return first.length > TRUNCATE.toolResult
-    ? first.slice(0, TRUNCATE.toolResult) + "…"
-    : first;
-}
-
-function clampLine(line: string): string {
-  return line.length > TRUNCATE.subagentLineWidth
-    ? line.slice(0, TRUNCATE.subagentLineWidth) + "…"
-    : line;
-}
-
 export function ToolBlock({ tool, indent = 0 }: Props) {
   const [frame, setFrame] = useState(0);
 
@@ -63,38 +45,35 @@ export function ToolBlock({ tool, indent = 0 }: Props) {
   const failed = tool.status === "failed";
   const done = tool.status === "done";
   const inputStr = fmtInput(tool.input);
-
-  const subagentLines = running
-    ? tool.subagentText
-        .split("\n")
-        .filter(Boolean)
-        .slice(-TRUNCATE.subagentTailLines)
-        .map(clampLine)
-    : [];
+  const display = tool.display;
+  const headerColor = failed
+    ? "rgb(var(--c-error))"
+    : done
+    ? "rgb(var(--c-success))"
+    : undefined;
 
   return (
     <div className="flex flex-col" style={{ marginLeft: `${indent * 1}rem` }}>
       {/* Tool header line */}
-      <div className="flex flex-row">
+      <div className={running ? "flex flex-row tool-running" : "flex flex-row"}>
         {running ? (
-          <span className="opacity-60 mr-2">{SPINNER_FRAMES[frame]}</span>
+          <span className="mr-2">{SPINNER_FRAMES[frame]}</span>
         ) : (
-          <span
-            className="mr-2"
-            style={{
-              color: failed ? "rgb(var(--c-error))" : "rgb(var(--c-success))",
-            }}
-          >
+          <span className="mr-2" style={{ color: headerColor }}>
             ●
           </span>
         )}
-        <span
-          className={running ? "opacity-60" : ""}
-          style={failed ? { color: "rgb(var(--c-error))" } : undefined}
-        >
-          {tool.name}
-        </span>
-        {inputStr !== "" && <span className="opacity-60 ml-2">{inputStr}</span>}
+        {display ? (
+          <>
+            <span style={{ color: headerColor }}>{display.action}</span>
+            <span className="opacity-60 ml-2">- {display.subject}</span>
+          </>
+        ) : (
+          <>
+            <span style={{ color: headerColor }}>{tool.name}</span>
+            {inputStr !== "" && <span className="opacity-60 ml-2">{inputStr}</span>}
+          </>
+        )}
         {failed && (
           <span className="ml-2" style={{ color: "rgb(var(--c-error))" }}>
             · error
@@ -102,41 +81,17 @@ export function ToolBlock({ tool, indent = 0 }: Props) {
         )}
       </div>
 
-      {/* Subagent streaming text */}
-      {subagentLines.length > 0 && (
-        <div className="ml-4 opacity-60">
-          {subagentLines.map((l, i) => (
-            <div key={i} className="whitespace-pre-wrap break-words">
-              {l}
+      {/* Subagent's interleaved text + sub-tools (main-agent-style streaming) */}
+      {tool.subBlocks.map((blk, i) =>
+        blk.kind === "text" ? (
+          blk.text === "" ? null : (
+            <div key={i} className="ml-4 whitespace-pre-wrap break-words">
+              {blk.text}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Nested sub-tools */}
-      {Array.from(tool.subTools.values()).map((sub) => (
-        <ToolBlock key={sub.id} tool={sub} indent={indent + 1} />
-      ))}
-
-      {/* Result line */}
-      {done && (
-        <div className="ml-4 opacity-60 flex flex-row">
-          <span className="mr-2">└</span>
-          <span className="whitespace-pre-wrap break-words flex-1">
-            {tool.output != null ? fmtOutput(tool.output) : "Done"}
-          </span>
-        </div>
-      )}
-      {failed && tool.output != null && (
-        <div className="ml-4 flex flex-row">
-          <span className="mr-2 opacity-60">└</span>
-          <span
-            className="whitespace-pre-wrap break-words flex-1"
-            style={{ color: "rgb(var(--c-error))" }}
-          >
-            {fmtOutput(tool.output)}
-          </span>
-        </div>
+          )
+        ) : (
+          <ToolBlock key={i} tool={blk.tool} indent={indent + 1} />
+        ),
       )}
     </div>
   );

@@ -46,6 +46,11 @@ class WikiSettings(BaseSettings):
     BATCH_TIMEOUT: int = 86400
     BATCH_FILE_THRESHOLD: int = 500
 
+    # Gemini explicit context caching (Phase 1 only)
+    # 임계 토큰 미달이거나 preview 모델 미지원 시 자동 폴백.
+    ENABLE_PROMPT_CACHING: bool = True
+    CACHE_TTL_SECONDS: int = 3600
+
     # Pipeline
     TIER_A_MAX_TOKENS: int = 8000
     TIER_C_MIN_TOKENS: int = 30000
@@ -65,11 +70,9 @@ class WikiSettings(BaseSettings):
     # 피고인이 누구인가요 0.747, 주요 쟁점 0.739) 기반 0.70 으로 설정.
     SEMANTIC_MIN_SIM: float = 0.70
 
-    # Langfuse
-    LANGFUSE_ENABLED: bool = False
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_BASE_URL: str = "http://localhost:3000"
+    # Langfuse 설정은 case_agent.observability 가 os.environ 에서 직접 읽는다.
+    # (LANGFUSE_ENABLED / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY /
+    #  LANGFUSE_HOST 또는 legacy LANGFUSE_BASE_URL)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

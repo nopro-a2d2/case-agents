@@ -7,10 +7,12 @@ Citation grammar (single canonical form used everywhere):
 where anchor is one of:
     L<a>-<b>          line range, 1-based inclusive  (txt files)
     p<n>              page number                    (json source files)
+    p<a>..<b>         page range, inclusive          (json source files)
     sec:<heading-id>  markdown heading slug          (wiki md files)
 
 Examples:
     json/1.json#p2
+    json/1.json#p1..5
     sources/공소장.txt#L120-L145
     wiki-output/concepts/concept-002.md#sec:1-개념-정의
 
@@ -38,7 +40,7 @@ from ..workspace import Workspace
 
 CITE_RE = re.compile(r"^(?P<path>[^\s#]+)#(?P<anchor>\S+)$")
 LINE_RE = re.compile(r"^L(?P<start>\d+)(?:-L?(?P<end>\d+))?$")
-PAGE_RE = re.compile(r"^p(?P<page>\d+)$")
+PAGE_RE = re.compile(r"^p(?P<start>\d+)(?:\.\.(?P<end>\d+))?$")
 SEC_RE = re.compile(r"^sec:(?P<slug>.+)$")
 
 
@@ -116,18 +118,34 @@ def read_with_anchor(ws: Workspace, citation: str, *, max_chars: int = 4000) -> 
         return AnchorRead(citation=str(cit), snippet=text[:max_chars], kind="lines")
 
     if (m := PAGE_RE.match(anchor)):
-        page = int(m.group("page"))
         if not path.endswith(".json"):
             raise ValueError(f"page anchor only valid on .json files, not {path}")
+        start_page = int(m.group("start"))
+        end_page = int(m.group("end")) if m.group("end") else start_page
+        if start_page > end_page:
+            raise ValueError(
+                f"invalid page range: p{start_page}..{end_page} (start > end)"
+            )
         doc = json.loads(ws.read(path))
+        parts: list[str] = []
+        last_page: int | None = None
         for blk in doc.get("content", []):
-            if int(blk.get("page", -1)) == page:
-                return AnchorRead(
-                    citation=str(cit),
-                    snippet=str(blk.get("text", ""))[:max_chars],
-                    kind="page",
-                )
-        raise ValueError(f"page {page} not found in {path}")
+            page = int(blk.get("page", -1))
+            if start_page <= page <= end_page:
+                if page != last_page:
+                    parts.append(f"--- p{page} ---")
+                    last_page = page
+                parts.append(str(blk.get("text", "")))
+        if not parts:
+            if start_page == end_page:
+                raise ValueError(f"page {start_page} not found in {path}")
+            raise ValueError(
+                f"page range {start_page}..{end_page} not found in {path}"
+            )
+        norm_anchor = f"p{start_page}" if start_page == end_page else f"p{start_page}..{end_page}"
+        norm_cit = Citation(path=path, anchor=norm_anchor)
+        snippet = "\n\n".join(parts)
+        return AnchorRead(citation=str(norm_cit), snippet=snippet[:max_chars], kind="page")
 
     if (m := SEC_RE.match(anchor)):
         slug = m.group("slug").strip()
@@ -139,7 +157,10 @@ def read_with_anchor(ws: Workspace, citation: str, *, max_chars: int = 4000) -> 
         snippet = "\n".join(text.splitlines()[start - 1 : end])
         return AnchorRead(citation=str(cit), snippet=snippet[:max_chars], kind="section")
 
-    raise ValueError(f"unsupported anchor: {anchor!r}")
+    raise ValueError(
+        f"unsupported anchor: {anchor!r}. "
+        f"Valid forms: Lstart-Lend | pN | pA..B | sec:slug"
+    )
 
 
 # ---------------------------------------------------------------------------

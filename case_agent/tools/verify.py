@@ -1,7 +1,7 @@
 """Verify-phase tools: citation validity + per-doctype completeness.
 
 Citation grammar (matches `tools/citation.py`):
-    `path#anchor` — anchor is `Lstart-Lend` | `pN` | `sec:slug`.
+    `path#anchor` — anchor is `Lstart-Lend` | `pN` | `pA..B` | `sec:slug`.
 
 `verify_citations(path)` walks an artifact/draft, finds every citation token
 that conforms to the grammar, and tries to read each one with read_with_anchor.

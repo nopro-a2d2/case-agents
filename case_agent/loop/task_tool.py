@@ -47,17 +47,35 @@ class StreamingTaskTool(BaseTool):
     def _run(self, subagent_name: str, prompt: str) -> str:
         return asyncio.run(self._arun(subagent_name, prompt))
 
-    async def _arun(self, subagent_name: str, prompt: str) -> str:
+    async def _arun(
+        self,
+        subagent_name: str,
+        prompt: str,
+        _callbacks: list | None = None,
+        _metadata: dict | None = None,
+        _display_label_fn: Any = None,
+    ) -> str:
         """Non-streaming path: run to completion and return final text."""
         final_text: str | None = None
-        async for ev in self._arun_streaming(subagent_name, prompt):
+        async for ev in self._arun_streaming(
+            subagent_name,
+            prompt,
+            _callbacks=_callbacks,
+            _metadata=_metadata,
+            _display_label_fn=_display_label_fn,
+        ):
             if isinstance(ev, Done):
                 final_text = ev.terminal.final_text
                 break
         return final_text or ""
 
     async def _arun_streaming(
-        self, subagent_name: str, prompt: str
+        self,
+        subagent_name: str,
+        prompt: str,
+        _callbacks: list | None = None,
+        _metadata: dict | None = None,
+        _display_label_fn: Any = None,
     ) -> AsyncIterator[StreamEvent]:
         """Yield all StreamEvents from the subagent loop.
 
@@ -89,6 +107,9 @@ class StreamingTaskTool(BaseTool):
             tools=sub_tools,
             model=sub_model,
             max_turns=self.max_turns,
+            callbacks=_callbacks,
+            metadata=_metadata,
+            display_label_fn=_display_label_fn,
         ):
             yield ev
             if isinstance(ev, Done):

@@ -48,6 +48,7 @@ class ToolStart:
     id: str
     name: str
     input: dict[str, Any]
+    display: dict[str, str] | None = None  # {"action": "...", "subject": "..."} when known
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class SubagentToolStart:
     sub_id: str
     name: str
     input: dict[str, Any]
+    display: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

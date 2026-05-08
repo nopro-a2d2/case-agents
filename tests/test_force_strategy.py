@@ -22,7 +22,9 @@ class _CapturingModel:
     def bind_tools(self, _tools):  # noqa: ARG002 — not exercised
         return self
 
-    def astream(self, messages: Sequence[BaseMessage]) -> AsyncIterator[AIMessageChunk]:
+    def astream(
+        self, messages: Sequence[BaseMessage], **_: object
+    ) -> AsyncIterator[AIMessageChunk]:
         self.captured = list(messages)
 
         async def gen():

@@ -24,7 +24,7 @@ load_dotenv()
 
 from wiki_builder.config import apply_case_path, wiki_settings  # noqa: E402
 from wiki_builder.observability import flush as langfuse_flush  # noqa: E402
-from wiki_builder.observability import get_langfuse, get_token_stats  # noqa: E402
+from wiki_builder.observability import get_langfuse, get_token_stats, set_session_id  # noqa: E402
 from wiki_builder.wiki_store import append_log, ensure_dirs, wiki_dir, write_source_page  # noqa: E402
 from wiki_builder.concept_extractor import run_phase3  # noqa: E402
 from wiki_builder.cross_ref import run_phase4, sanitize_wiki_pages, strip_all_wikilinks  # noqa: E402
@@ -82,13 +82,16 @@ def setup_logging() -> None:
 async def main() -> None:
     args = parse_args()
     apply_case_path(args.case)
+    set_session_id(args.case.name)
     setup_logging()
 
     logger.info("=== 위키 빌더 시작 (case=%s, phase=%s) ===", args.case, args.phase)
 
+    import os as _os
     lf = get_langfuse()
     if lf:
-        logger.info("Langfuse 연결됨: %s", wiki_settings.LANGFUSE_BASE_URL)
+        host = _os.environ.get("LANGFUSE_HOST") or _os.environ.get("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+        logger.info("Langfuse 연결됨: %s", host)
     else:
         logger.info("Langfuse 비활성화")
 
