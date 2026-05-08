@@ -193,13 +193,14 @@ async def query(
         )
         state.append(assistant_msg)
 
-        usage = assistant_msg.response_metadata.get("usage", {})
+        usage = getattr(accumulated, "usage_metadata", None) or {}
         if usage:
+            details = usage.get("input_token_details") or {}
             yield TokenUsage(
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
-                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
-                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+                input_tokens=int(usage.get("input_tokens") or 0),
+                output_tokens=int(usage.get("output_tokens") or 0),
+                cache_read_tokens=int(details.get("cache_read") or 0),
+                cache_creation_tokens=int(details.get("cache_creation") or 0),
             )
 
         # 2. stop_reason branch.

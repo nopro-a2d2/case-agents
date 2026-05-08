@@ -263,7 +263,7 @@ export function App({ bridge, caseId, model }: Props) {
       )}
 
       {currentAssistant && <AssistantBubble message={currentAssistant} />}
-      {isThinking && <ThinkingSpinner />}
+      {isThinking && <ThinkingSpinner outputTokens={tokenUsage.output} />}
 
       <TodoPanel todos={todos} />
       {awaitingPlanApproval ? (
@@ -276,7 +276,7 @@ export function App({ bridge, caseId, model }: Props) {
       ) : (
         <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} />
       )}
-      <StatusLine planMode={planMode} tokenUsage={tokenUsage} />
+      <StatusLine planMode={planMode} />
     </Box>
   );
 }

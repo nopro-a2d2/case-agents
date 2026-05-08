@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { SPINNER_FRAMES, SPINNER_INTERVAL_MS } from "../types.js";
 
-export function ThinkingSpinner() {
+interface Props {
+  outputTokens?: number;
+}
+
+export function ThinkingSpinner({ outputTokens = 0 }: Props) {
   const [frame, setFrame] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(Date.now());
@@ -14,9 +18,13 @@ export function ThinkingSpinner() {
     return () => clearInterval(t);
   }, []);
 
+  const tokenSuffix = outputTokens > 0
+    ? ` · ↓ ${outputTokens.toLocaleString("en-US")} tokens`
+    : "";
+
   return (
     <div className="px-4 mt-2 opacity-60">
-      <span>· {SPINNER_FRAMES[frame]} Thinking… ({elapsed}s)</span>
+      <span>· {SPINNER_FRAMES[frame]} Thinking… ({elapsed}s{tokenSuffix})</span>
     </div>
   );
 }

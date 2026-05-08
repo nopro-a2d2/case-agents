@@ -312,7 +312,7 @@ export function App({ caseId, root, model }: Props) {
       )}
 
       {currentAssistant && <AssistantBubble message={currentAssistant} />}
-      {isThinking && <ThinkingSpinner />}
+      {isThinking && <ThinkingSpinner outputTokens={tokenUsage.output} />}
 
       <TodoPanel todos={todos} />
 
@@ -337,7 +337,7 @@ export function App({ caseId, root, model }: Props) {
               planMode={planMode}
             />
           )}
-          <StatusLine planMode={planMode} thinking={isThinking} connected={connected} tokenUsage={tokenUsage} />
+          <StatusLine planMode={planMode} thinking={isThinking} connected={connected} />
         </div>
       </div>
     </div>
