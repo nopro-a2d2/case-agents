@@ -46,6 +46,7 @@ from .types import (
     Terminal,
     TextDelta,
     TodosUpdated,
+    TokenUsage,
     ToolEnd,
     ToolStart,
     TurnStart,
@@ -191,6 +192,15 @@ async def query(
             response_metadata=dict(accumulated.response_metadata or {}),
         )
         state.append(assistant_msg)
+
+        usage = assistant_msg.response_metadata.get("usage", {})
+        if usage:
+            yield TokenUsage(
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+            )
 
         # 2. stop_reason branch.
         if not assistant_msg.tool_calls:

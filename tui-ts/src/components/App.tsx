@@ -71,6 +71,7 @@ export function App({ bridge, caseId, model }: Props) {
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [planMode, setPlanMode] = useState(false);
   const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
   const planTurnInFlightRef = useRef(false);
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
@@ -166,6 +167,14 @@ export function App({ bridge, caseId, model }: Props) {
         }
         case "todos_updated": {
           setTodos(ev.todos);
+          break;
+        }
+        case "token_usage": {
+          setTokenUsage((prev) => ({
+            input: prev.input + ev.input_tokens,
+            output: prev.output + ev.output_tokens,
+            cacheRead: prev.cacheRead + ev.cache_read_tokens,
+          }));
           break;
         }
         case "done": {
@@ -267,7 +276,7 @@ export function App({ bridge, caseId, model }: Props) {
       ) : (
         <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} />
       )}
-      <StatusLine planMode={planMode} />
+      <StatusLine planMode={planMode} tokenUsage={tokenUsage} />
     </Box>
   );
 }

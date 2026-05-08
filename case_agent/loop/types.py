@@ -106,10 +106,21 @@ class TodosUpdated:
     todos: tuple[dict[str, Any], ...]
 
 
+@dataclass(frozen=True)
+class TokenUsage:
+    """Token usage for one assistant turn, emitted after each model response."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+
 StreamEvent = Union[
     TurnStart, TextDelta, ToolStart, ToolEnd,
     SubagentTextDelta, SubagentToolStart, SubagentToolEnd,
     TodosUpdated,
+    TokenUsage,
     Done,
 ]
 
@@ -145,6 +156,7 @@ __all__ = [
     "TerminalReason",
     "TextDelta",
     "TodosUpdated",
+    "TokenUsage",
     "ToolEnd",
     "ToolStart",
     "TurnStart",

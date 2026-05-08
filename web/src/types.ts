@@ -19,6 +19,7 @@ export type StreamEvent =
   | { type: "subagent_tool_start"; tool_id: string; sub_id: string; name: string; input: unknown; display?: ToolDisplay | null }
   | { type: "subagent_tool_end"; tool_id: string; sub_id: string; output: unknown; is_error: boolean }
   | { type: "todos_updated"; todos: TodoItem[] }
+  | { type: "token_usage"; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number }
   | { type: "done"; reason: string; final_text: string | null; error: string | null }
   | { type: "error"; error: string }
   | { type: "unknown" };
