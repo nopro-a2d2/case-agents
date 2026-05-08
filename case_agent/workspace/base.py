@@ -27,6 +27,7 @@ READONLY_PREFIXES: tuple[str, ...] = (
 
 WRITABLE_PREFIXES: tuple[str, ...] = (
     "artifacts",
+    "briefs",
     "audit",
     "plans",
     "memory",

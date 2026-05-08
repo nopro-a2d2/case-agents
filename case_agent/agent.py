@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from .model import VertexEmbedderAdapter, build_embedder, build_heavy, build_light
 from .prompts import MAIN_SYSTEM_PROMPT
-from .subagents import build_explore_subagent
+from .subagents import build_explore_subagent, build_brief_subagents
 from .tools.agent_tools import (
     build_calculate_tool,
     build_check_completeness_tool,
@@ -22,6 +22,7 @@ from .tools.agent_tools import (
     build_verify_citations_tool,
     build_write_file_tool,
 )
+from .tools.briefs import build_brief_tools
 from .tools.memory import build_memory_tools
 from .tools.strategy import build_strategy_tools
 from .tools.todos import TodoStore, build_write_todos_tool
@@ -85,6 +86,7 @@ def build_case_agent_components(
         build_calculate_tool(),
         build_write_file_tool(workspace),
     ]
+    case_tools.extend(build_brief_tools(workspace))
     case_tools.extend(build_memory_tools(workspace))
     case_tools.extend(build_strategy_tools(workspace))
 
@@ -92,7 +94,8 @@ def build_case_agent_components(
     case_tools.append(build_write_todos_tool(todos_store))
 
     explore = build_explore_subagent(workspace, emb, model=sub_model)
-    subagents: dict[str, dict[str, Any]] = {explore["name"]: dict(explore)}
+    brief_sas = build_brief_subagents(workspace, emb, model=main)
+    subagents: dict[str, dict[str, Any]] = {explore["name"]: dict(explore), **brief_sas}
 
     # Wire the task tool last so the registry it captures is final.
     from .loop.task_tool import build_task_tool
