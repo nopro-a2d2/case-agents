@@ -77,6 +77,7 @@ export function App({ caseId, root, model }: Props) {
   const [planMode, setPlanMode] = useState(false);
   const [connected, setConnected] = useState(false);
   const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
   const planTurnInFlightRef = useRef(false);
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
@@ -179,6 +180,14 @@ export function App({ caseId, root, model }: Props) {
         }
         case "todos_updated": {
           setTodos(ev.todos);
+          break;
+        }
+        case "token_usage": {
+          setTokenUsage((prev) => ({
+            input: prev.input + ev.input_tokens,
+            output: prev.output + ev.output_tokens,
+            cacheRead: prev.cacheRead + ev.cache_read_tokens,
+          }));
           break;
         }
         case "done": {
@@ -303,7 +312,7 @@ export function App({ caseId, root, model }: Props) {
       )}
 
       {currentAssistant && <AssistantBubble message={currentAssistant} />}
-      {isThinking && <ThinkingSpinner />}
+      {isThinking && <ThinkingSpinner outputTokens={tokenUsage.output} />}
 
       <TodoPanel todos={todos} />
 
