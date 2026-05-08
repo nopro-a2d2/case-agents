@@ -26,6 +26,7 @@ from .types import (
     SubagentToolStart,
     TextDelta,
     TodosUpdated,
+    TokenUsage,
     ToolEnd,
     ToolStart,
     TurnStart,
@@ -68,6 +69,14 @@ def _serialize(ev: Any) -> dict:
         }
     if isinstance(ev, TodosUpdated):
         return {"type": "todos_updated", "todos": list(ev.todos)}
+    if isinstance(ev, TokenUsage):
+        return {
+            "type": "token_usage",
+            "input_tokens": ev.input_tokens,
+            "output_tokens": ev.output_tokens,
+            "cache_read_tokens": ev.cache_read_tokens,
+            "cache_creation_tokens": ev.cache_creation_tokens,
+        }
     if isinstance(ev, Done):
         t = ev.terminal
         return {

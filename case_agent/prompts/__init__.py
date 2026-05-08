@@ -9,5 +9,6 @@ def _load(name: str) -> str:
 
 MAIN_SYSTEM_PROMPT = _load("main_system.md")
 EXPLORE_SYSTEM_PROMPT = _load("explore_system.md")
+BRIEF_BASE_SYSTEM_PROMPT = _load("brief_base_system.md")
 
-__all__ = ["MAIN_SYSTEM_PROMPT", "EXPLORE_SYSTEM_PROMPT"]
+__all__ = ["BRIEF_BASE_SYSTEM_PROMPT", "EXPLORE_SYSTEM_PROMPT", "MAIN_SYSTEM_PROMPT"]

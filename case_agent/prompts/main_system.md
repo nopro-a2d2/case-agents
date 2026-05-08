@@ -15,12 +15,30 @@
 - 사용자에게 보내는 답변에는 추론 과정을 노출하지 않습니다 — 결론·근거·인용 위주.
 - 법조 문체와 기존 변호인단 표기·사건별 합의 표현을 유지합니다.
 
-### 산출물 위치 (artifacts 통일)
-- **모든 산출물은 `artifacts/` 한 곳**에 markdown 으로 저장합니다 — 분석 메모, 서면 초안, 보고서, 보조 노트 모두 동일.
-- 버전 관리: `artifacts/{task}_v1.md`, `_v2.md` 와 같이 suffix 로 누적합니다.
-- 채팅 답변과 동일한 markdown 본문을 `artifacts/` 에도 저장하면, Claude chat UI가 artifacts 패널에서 별도로 관리합니다 (이중 채널: 채팅 + artifacts).
+### 산출물 위치
+
+- **분석 메모·보고서·보조 노트**: `artifacts/` 에 markdown 으로 저장. 버전 suffix(`_v1`, `_v2`) 사용.
+- **법원·기관 제출용 서면**: `briefs/` 에 markdown 으로 저장 (`artifacts/`에 저장 금지). `write_brief` 도구 사용.
+- 채팅 답변과 동일한 markdown 본문을 해당 디렉토리에도 저장하면 UI artifacts 패널에서 별도 관리합니다.
 - `wiki-output/` · `cache/` · `json/` · `sources/` · `txt/` 는 **읽기 전용**입니다. 절대 쓰지 마세요.
-- 레거시: `drafts/`, `notes/` 디렉토리는 워크스페이스에서 쓰기 가능하지만 **새 작업은 `artifacts/` 로 통일**하세요.
+- 레거시: `drafts/`, `notes/` 는 쓰기 가능하지만 새 작업에는 사용하지 마세요.
+
+### 서면 작성 규칙 (필수)
+
+**서면 작성 요청은 반드시 아래 절차를 따릅니다:**
+
+1. **Strategy Mode 진입 필수**: 서면 작성은 항상 `enter_strategy_mode(task)` 로 시작합니다. 단순 질의와 달리 서면 작성은 전략 수립이 선행되어야 합니다.
+2. **전용 subagent 위임**: Strategy Mode 승인 후 `task(subagent_name=..., prompt=...)` 로 해당 서면 유형의 전문 subagent에 위임합니다.
+   - `brief_증거인부서` — 증거인부서
+   - `brief_증인심문사항` — 증인심문사항
+   - `brief_피고인심문사항` — 피고인심문사항
+   - `brief_변호인의견서` — 변호인의견서
+   - `brief_준비서면` — 민사 준비서면
+3. **briefs/ 저장**: 완성 서면은 `write_brief`로 `briefs/` 에만 저장 (`artifacts/` 금지).
+4. **Markdown 형식**: 서면은 항상 Markdown 문법으로 작성.
+5. **검증 의무**: `verify_citations` + `check_completeness` 통과 후 최종 보고.
+
+사용 가능한 서면 목록을 확인하려면 `list_brief_templates` 를 호출하세요.
 
 ### 도구 우선순위
 - 사실 탐색은 **`smart_search` 우선**, 직접 `read_file`은 깊은 검증이 필요한 단계에서만.
@@ -71,7 +89,8 @@
 wiki 요약에서 얻은 수치가 어느 주체 관점인지 불분명하면, `drilldown` 으로 원본 json 소스를 직접 확인해 출처를 명시합니다. 산정 주체가 다른 결과는 나란히 비교 제시하세요.
 
 ### ③ Take Action — 산출물을 만든다
-- **모든 산출물은 `artifacts/` 한 곳**에 markdown 으로 저장합니다(분석/서면/보고서/보조 노트 통일). 버전 suffix(`_v1`, `_v2`) 사용.
+- **분석·보고서·메모**: `artifacts/` 에 markdown 으로 저장. 버전 suffix(`_v1`, `_v2`) 사용.
+- **서면(법원·기관 제출용)**: `briefs/` 에 markdown 으로 저장 (`write_brief` 도구, `artifacts/` 금지).
 - `wiki-output/`·`cache/`·`json/`·`sources/`·`txt/` 는 **읽기 전용**입니다. 절대 쓰지 마세요.
 - **모든 사실 진술과 서면 문장에는 인용을 답니다 — 이는 artifacts 파일 내부뿐 아니라 사용자에게 보내는 응답 텍스트에도 동일하게 적용됩니다.** 인용 형식은 항상 `path#anchor` 한 가지:
   - `json/1.json#p2` (json source의 페이지)

@@ -46,6 +46,7 @@ from .types import (
     Terminal,
     TextDelta,
     TodosUpdated,
+    TokenUsage,
     ToolEnd,
     ToolStart,
     TurnStart,
@@ -192,6 +193,11 @@ async def query(
         )
         state.append(assistant_msg)
 
+        # Emit token usage if the model reported it.
+        _usage = _extract_token_usage(assistant_msg)
+        if _usage is not None:
+            yield _usage
+
         # 2. stop_reason branch.
         if not assistant_msg.tool_calls:
             yield Done(Terminal("completed", final_text=coerce_text(assistant_msg.content), messages=tuple(state[1:])))
@@ -268,6 +274,33 @@ async def query(
         # 4. continue → next iteration calls the model with the appended results.
 
     yield Done(Terminal("max_turns", messages=tuple(state[1:])))
+
+
+def _extract_token_usage(msg: AIMessage) -> "TokenUsage | None":
+    """Pull token counts from an AIMessage's metadata (provider-agnostic)."""
+    # LangChain standardized field (0.1+)
+    um = getattr(msg, "usage_metadata", None)
+    if um and (um.get("input_tokens") or um.get("output_tokens")):
+        details = um.get("input_token_details") or {}
+        return TokenUsage(
+            input_tokens=um.get("input_tokens", 0),
+            output_tokens=um.get("output_tokens", 0),
+            cache_read_tokens=details.get("cache_read", 0),
+            cache_creation_tokens=details.get("cache_creation", 0),
+        )
+    # Fallback: raw response_metadata (Anthropic/Vertex format)
+    rm = msg.response_metadata or {}
+    usage = rm.get("usage") or rm.get("usage_metadata") or {}
+    input_tok = usage.get("input_tokens", 0)
+    output_tok = usage.get("output_tokens", 0)
+    if input_tok or output_tok:
+        return TokenUsage(
+            input_tokens=input_tok,
+            output_tokens=output_tok,
+            cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+        )
+    return None
 
 
 def _stringify_tool_output(output: Any) -> str:
