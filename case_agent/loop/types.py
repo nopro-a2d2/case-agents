@@ -107,6 +107,25 @@ class TodosUpdated:
 
 
 @dataclass(frozen=True)
+class Cleared:
+    """Emitted after a ``/clear`` control command — server has dropped its
+    in-flight turn and reset history. The client should mirror by wiping
+    its message list, todos, and counters."""
+
+
+@dataclass(frozen=True)
+class SkillsList:
+    """Emitted once at connection start so clients can populate the
+    slash-command picker. Each entry carries SKILL.md frontmatter only;
+    the body is fetched lazily by the ``skill`` tool.
+
+    Entry shape: ``{"name", "description", "argument_hint", "when_to_use"}``.
+    """
+
+    skills: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
 class TokenUsage:
     """Token usage for one assistant turn, emitted after each model response."""
 
@@ -120,7 +139,9 @@ StreamEvent = Union[
     TurnStart, TextDelta, ToolStart, ToolEnd,
     SubagentTextDelta, SubagentToolStart, SubagentToolEnd,
     TodosUpdated,
+    SkillsList,
     TokenUsage,
+    Cleared,
     Done,
 ]
 
@@ -147,7 +168,9 @@ def coerce_text(content: Any) -> str:
 
 
 __all__ = [
+    "Cleared",
     "Done",
+    "SkillsList",
     "StreamEvent",
     "SubagentTextDelta",
     "SubagentToolEnd",

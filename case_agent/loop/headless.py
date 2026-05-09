@@ -18,9 +18,13 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from ..commands import CommandContext, try_dispatch
 from .runner import stream_query
+from .slash import build_skills_list_event, expand_slash
 from .types import (
+    Cleared,
     Done,
+    SkillsList,
     SubagentTextDelta,
     SubagentToolEnd,
     SubagentToolStart,
@@ -69,6 +73,10 @@ def _serialize(ev: Any) -> dict:
         }
     if isinstance(ev, TodosUpdated):
         return {"type": "todos_updated", "todos": list(ev.todos)}
+    if isinstance(ev, SkillsList):
+        return {"type": "skills_list", "skills": list(ev.skills)}
+    if isinstance(ev, Cleared):
+        return {"type": "cleared"}
     if isinstance(ev, TokenUsage):
         return {
             "type": "token_usage",
@@ -114,6 +122,12 @@ async def headless_loop(case: str, root: str) -> None:
     ws = LocalFS(case_id=case, root=root)
     components = build_case_agent_components(ws)
     history: list[BaseMessage] = []
+
+    # Advertise available commands + skills up-front so clients can populate
+    # a slash picker. Body of each SKILL.md is loaded lazily via the `skill`
+    # tool; commands run server-side via dispatch (see try_dispatch below).
+    if components.commands or components.skills:
+        _emit(build_skills_list_event(components.commands, components.skills))
 
     # One Langfuse session per stdio process — all turns roll up under it.
     chat_session_id = f"headless-{uuid.uuid4().hex[:12]}"
@@ -167,6 +181,29 @@ async def headless_loop(case: str, root: str) -> None:
         force_strategy: bool = bool(payload.get("force_strategy", False))
         if not prompt:
             continue
+
+        # Built-in command dispatch (e.g. /clear). Handler may abort the
+        # in-flight turn, reset state, and return wire events to emit.
+        async def _abort_in_flight() -> None:
+            if run_task and not run_task.done():
+                abort_event.set()
+                try:
+                    await run_task
+                except Exception:  # noqa: BLE001
+                    pass
+
+        ctx = CommandContext(
+            abort=_abort_in_flight,
+            reset_history=lambda: history.clear(),
+            reset_todos=lambda: components.todos_store.replace([]),
+        )
+        handled, events = await try_dispatch(prompt, components.commands, ctx)
+        if handled:
+            for ev in events:
+                _emit(ev)
+            continue
+
+        prompt = expand_slash(prompt, components.skills)
 
         # Drop overlapping prompts — same policy as ws_server.
         if run_task and not run_task.done():
