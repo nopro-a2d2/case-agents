@@ -46,3 +46,7 @@ def build_explore_subagent(
     if model is not None:
         sa["model"] = model
     return sa
+
+
+build_subagent = build_explore_subagent
+

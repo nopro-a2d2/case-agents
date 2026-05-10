@@ -17,6 +17,7 @@ export const colors = {
   permission:   "rgb(87,105,247)",   // reserved — future permission prompts
   planMode:     "rgb(0,102,102)",    // reserved — future plan mode
   userBubbleBg: "rgb(235,235,235)",  // soft light-gray bar behind UserBubble (truecolor; not ANSI "gray", which maps to a dark palette index on most terminals)
+  suggestion:   "cyan",              // slash picker active row — mirrors claude-code "suggestion" theme key
 } as const;
 
 export const glyphs = {

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, useApp, useInput } from "ink";
-import type { AssistantBlock, Message, SubBlock, TodoItem, ToolCallState } from "../types.js";
+import type { AssistantBlock, Message, SkillEntry, SubBlock, TodoItem, ToolCallState } from "../types.js";
 import type { PythonBridge } from "../bridge.js";
 import type { StreamEvent } from "../types.js";
 import { AssistantBubble } from "./AssistantBubble.js";
@@ -72,6 +72,7 @@ export function App({ bridge, caseId, model }: Props) {
   const [planMode, setPlanMode] = useState(false);
   const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
   const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
   const planTurnInFlightRef = useRef(false);
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
@@ -169,6 +170,24 @@ export function App({ bridge, caseId, model }: Props) {
           setTodos(ev.todos);
           break;
         }
+        case "skills_list": {
+          setSkills(ev.skills);
+          break;
+        }
+        case "cleared": {
+          // Idempotent — handleSubmit already reset locally; this is the
+          // safety net that runs after the backend ack.
+          setCompletedMessages([]);
+          setCurrentAssistant(null);
+          currentAssistantRef.current = null;
+          setIsThinking(false);
+          setTodos([]);
+          setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
+          setAwaitingPlanApproval(false);
+          setPlanMode(false);
+          planTurnInFlightRef.current = false;
+          break;
+        }
         case "token_usage": {
           setTokenUsage((prev) => ({
             input: prev.input + ev.input_tokens,
@@ -210,13 +229,30 @@ export function App({ bridge, caseId, model }: Props) {
     if (key.shift && key.tab) setPlanMode((on) => !on);
   });
 
+  const resetSession = useCallback(() => {
+    setCompletedMessages([]);
+    setCurrentAssistant(null);
+    currentAssistantRef.current = null;
+    setIsThinking(false);
+    setTodos([]);
+    setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
+    setAwaitingPlanApproval(false);
+    setPlanMode(false);
+    planTurnInFlightRef.current = false;
+  }, []);
+
   const handleSubmit = useCallback((prompt: string) => {
+    if (prompt.trim() === "/clear") {
+      resetSession();
+      bridge.send(prompt, { forceStrategy: false });
+      return;
+    }
     const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
     if (planMode) planTurnInFlightRef.current = true;
     bridge.send(prompt, { forceStrategy: planMode });
-  }, [bridge, planMode]);
+  }, [bridge, planMode, resetSession]);
 
   const handleAbort = useCallback(() => {
     bridge.abort();
@@ -274,7 +310,7 @@ export function App({ bridge, caseId, model }: Props) {
           disabled={isThinking}
         />
       ) : (
-        <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} />
+        <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} skills={skills} />
       )}
       <StatusLine planMode={planMode} />
     </Box>

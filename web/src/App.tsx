@@ -3,6 +3,7 @@ import { WSBridge } from "./bridge.js";
 import type {
   AssistantBlock,
   Message,
+  SkillEntry,
   StreamEvent,
   SubBlock,
   TodoItem,
@@ -78,6 +79,7 @@ export function App({ caseId, root, model }: Props) {
   const [connected, setConnected] = useState(false);
   const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
   const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
   const planTurnInFlightRef = useRef(false);
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
@@ -182,6 +184,25 @@ export function App({ caseId, root, model }: Props) {
           setTodos(ev.todos);
           break;
         }
+        case "skills_list": {
+          setSkills(ev.skills);
+          break;
+        }
+        case "cleared": {
+          // Idempotent — handleSubmit already reset locally for instant
+          // feedback, but TUI/other clients (or stale state) get the same
+          // wipe here.
+          setCompletedMessages([]);
+          setCurrentAssistant(null);
+          currentAssistantRef.current = null;
+          setIsThinking(false);
+          setTodos([]);
+          setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
+          setAwaitingPlanApproval(false);
+          setPlanMode(false);
+          planTurnInFlightRef.current = false;
+          break;
+        }
         case "token_usage": {
           setTokenUsage((prev) => ({
             input: prev.input + ev.input_tokens,
@@ -254,13 +275,31 @@ export function App({ caseId, root, model }: Props) {
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }, [completedMessages, currentAssistant, isThinking, todos]);
 
+  const resetSession = useCallback(() => {
+    setCompletedMessages([]);
+    setCurrentAssistant(null);
+    currentAssistantRef.current = null;
+    setIsThinking(false);
+    setTodos([]);
+    setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
+    setAwaitingPlanApproval(false);
+    setPlanMode(false);
+    planTurnInFlightRef.current = false;
+  }, []);
+
   const handleSubmit = useCallback((prompt: string) => {
+    if (prompt.trim() === "/clear") {
+      // Wipe locally for instant feedback; backend mirrors and acks via "cleared".
+      resetSession();
+      bridge.send(prompt, { forceStrategy: false });
+      return;
+    }
     const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
     if (planMode) planTurnInFlightRef.current = true;
     bridge.send(prompt, { forceStrategy: planMode });
-  }, [bridge, planMode]);
+  }, [bridge, planMode, resetSession]);
 
   const handleAbort = useCallback(() => {
     bridge.abort();
@@ -335,6 +374,7 @@ export function App({ caseId, root, model }: Props) {
               onTogglePlanMode={handleTogglePlanMode}
               disabled={isThinking}
               planMode={planMode}
+              skills={skills}
             />
           )}
           <StatusLine planMode={planMode} thinking={isThinking} connected={connected} />

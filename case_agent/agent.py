@@ -7,24 +7,17 @@ can drive them directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .commands import Command, CommandHandler, discover_commands
 from .model import VertexEmbedderAdapter, build_embedder, build_heavy, build_light
 from .prompts import MAIN_SYSTEM_PROMPT
-from .subagents import build_explore_subagent
-from .tools.agent_tools import (
-    build_calculate_tool,
-    build_check_completeness_tool,
-    build_list_evidence_tool,
-    build_read_with_anchor_tool,
-    build_smart_search_tool,
-    build_verify_citations_tool,
-    build_write_file_tool,
-)
-from .tools.memory import build_memory_tools
-from .tools.strategy import build_strategy_tools
-from .tools.todos import TodoStore, build_write_todos_tool
+from .skills import Skill, discover_skills
+from .skills.prompt import build_skill_listing
+from .subagents import discover_subagents
+from .tools import TodoStore, build_all_tools
 from .workspace import LocalFS
 
 if TYPE_CHECKING:
@@ -33,6 +26,9 @@ if TYPE_CHECKING:
 
     from .tools.search import Embedder
     from .workspace import Workspace
+
+
+_BUNDLED_SKILLS_DIR = Path(__file__).parent / "skills" / "bundled"
 
 
 @dataclass
@@ -51,6 +47,8 @@ class CaseAgentComponents:
     system_prompt: str
     subagents: dict[str, dict[str, Any]]
     todos_store: TodoStore
+    skills: dict[str, Skill] = field(default_factory=dict)
+    commands: dict[str, tuple[Command, CommandHandler]] = field(default_factory=dict)
 
 
 def build_case_agent_components(
@@ -76,36 +74,40 @@ def build_case_agent_components(
     sub_model = light_model or build_light()
     emb = embedder or build_embedder()
 
-    case_tools: list[BaseTool] = [
-        build_smart_search_tool(workspace, emb),
-        build_read_with_anchor_tool(workspace),
-        build_list_evidence_tool(workspace),
-        build_verify_citations_tool(workspace),
-        build_check_completeness_tool(workspace),
-        build_calculate_tool(),
-        build_write_file_tool(workspace),
-    ]
-    case_tools.extend(build_memory_tools(workspace))
-    case_tools.extend(build_strategy_tools(workspace))
-
     todos_store = TodoStore()
-    case_tools.append(build_write_todos_tool(todos_store))
 
-    explore = build_explore_subagent(workspace, emb, model=sub_model)
-    subagents: dict[str, dict[str, Any]] = {explore["name"]: dict(explore)}
+    skills = discover_skills(
+        _BUNDLED_SKILLS_DIR,
+        workspace.case_root / "skills",  # workspace wins on collision
+    )
+
+    case_tools: list[BaseTool] = build_all_tools(workspace, emb, todos_store, skills)
+
+    subagents: dict[str, dict[str, Any]] = discover_subagents(
+        workspace, emb, model=sub_model
+    )
 
     # Wire the task tool last so the registry it captures is final.
     from .loop.task_tool import build_task_tool
 
     case_tools.append(build_task_tool(subagents=subagents, fallback_model=sub_model))
 
+    system_prompt = MAIN_SYSTEM_PROMPT
+    listing = build_skill_listing(skills)
+    if listing:
+        system_prompt = f"{MAIN_SYSTEM_PROMPT}\n\n{listing}"
+
+    commands = discover_commands()
+
     return CaseAgentComponents(
         workspace=workspace,
         model=main,
         tools=case_tools,
-        system_prompt=MAIN_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         subagents=subagents,
         todos_store=todos_store,
+        skills=skills,
+        commands=commands,
     )
 
 

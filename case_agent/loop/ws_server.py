@@ -24,9 +24,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from ..commands import CommandContext, try_dispatch
 from ..observability import flush as _obs_flush
 from .headless import _serialize
 from .runner import stream_query
+from .slash import build_skills_list_event, expand_slash
 from .types import Done
 
 logger = logging.getLogger("case_agent.ws")
@@ -58,6 +60,13 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
         workspace = LocalFS(case_id=case, root=root)
         components = build_case_agent_components(workspace)
         history: list[BaseMessage] = []
+
+        # First frame: advertise commands + skills registry to the client.
+        if components.commands or components.skills:
+            await ws.send_text(json.dumps(
+                _serialize(build_skills_list_event(components.commands, components.skills)),
+                ensure_ascii=False,
+            ))
 
         # One Langfuse session per WS connection — every turn in this
         # browser tab rolls up under it.
@@ -130,6 +139,29 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                 prompt = payload.get("prompt") or ""
                 if not prompt:
                     continue
+
+                # Built-in command dispatch (/clear etc.). Handler returns
+                # wire events; we serialize and send.
+                async def _abort_in_flight() -> None:
+                    if run_task and not run_task.done():
+                        abort_event.set()
+                        try:
+                            await run_task
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                ctx = CommandContext(
+                    abort=_abort_in_flight,
+                    reset_history=lambda: history.clear(),
+                    reset_todos=lambda: components.todos_store.replace([]),
+                )
+                handled, events = await try_dispatch(prompt, components.commands, ctx)
+                if handled:
+                    for ev in events:
+                        await ws.send_text(json.dumps(_serialize(ev), ensure_ascii=False))
+                    continue
+
+                prompt = expand_slash(prompt, components.skills)
                 force_strategy = bool(payload.get("force_strategy", False))
 
                 # Drop if a previous turn is still running.
