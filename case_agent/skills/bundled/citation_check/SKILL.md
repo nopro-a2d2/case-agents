@@ -1,8 +1,8 @@
 ---
 name: citation_check
-description: Verify every `path#anchor` citation in an artifact resolves against the corresponding source files. Surface failures and suggest fixes.
+description: Verify every `@@[id]` citation in an artifact resolves against the corresponding source files. Surface failures and suggest fixes.
 when_to_use: Before delivering any artifact that contains citations.
-allowed-tools: verify_citations, read_with_anchor
+allowed-tools: verify_citations, read_evidence
 argument-hint: <artifact_path>
 ---
 
@@ -18,11 +18,11 @@ You were invoked to validate citations in a single artifact file.
 
 1. Run `verify_citations(path=<artifact_path>)`. The tool returns a JSON report
    with a per-citation pass/fail list.
-2. If `failed > 0`, for each failing token:
-   * Call `read_with_anchor` against a *plausible* corrected anchor on the same
-     source file (e.g. fix `p1-5` → `p1..5`, or recover the right page range
-     from a nearby valid citation).
-   * Suggest the corrected `path#anchor` next to the original.
+2. If `failed > 0`, for each failing token (an `@@[id]` whose id is not
+   in the workspace evidence registry):
+   * Call `list_evidence(name_contains=...)` or `smart_search` to find the
+     intended document and recover its real `id` from the result.
+   * Suggest the corrected `@@[id]` next to the original.
 3. Reply with a JSON object:
    ```json
    {
@@ -36,6 +36,6 @@ You were invoked to validate citations in a single artifact file.
 
 ## Rules
 
-* Use **only** `verify_citations` and `read_with_anchor`. Do not search or
+* Use **only** `verify_citations` and `read_evidence`. Do not search or
   draft new prose.
 * If the artifact path does not exist, return `{"ok": false, "error": "..."}`.

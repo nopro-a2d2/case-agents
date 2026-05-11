@@ -230,6 +230,9 @@ async def query(
                 yield ToolEnd(tc_id, err, True)
                 continue
 
+            todos_before = (
+                tuple(todos_store.snapshot()) if todos_store is not None else None
+            )
             try:
                 if hasattr(tool, "_arun_streaming"):
                     # StreamingTaskTool: bubble subagent events up to the TUI.
@@ -268,8 +271,10 @@ async def query(
                     )
                 )
                 yield ToolEnd(tc_id, output, False)
-                if tc_name == "write_todos" and todos_store is not None:
-                    yield TodosUpdated(todos=tuple(todos_store.snapshot()))
+                if todos_store is not None:
+                    todos_after = tuple(todos_store.snapshot())
+                    if todos_after != todos_before:
+                        yield TodosUpdated(todos=todos_after)
             except Exception as e:  # noqa: BLE001 — feed error back to the model
                 err = f"{type(e).__name__}: {e}"
                 state.append(

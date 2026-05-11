@@ -1,12 +1,12 @@
 """Verify-phase tools: citation validity + per-doctype completeness.
 
 Citation grammar (matches `tools/citation.py`):
-    `path#anchor` — anchor is `Lstart-Lend` | `pN` | `pA..B` | `sec:slug`.
+    `@@[id]` — single id token. No path, no anchor.
 
-`verify_citations(path)` walks an artifact/draft, finds every citation token
-that conforms to the grammar, and tries to read each one with read_with_anchor.
-Returns a per-citation pass/fail report; failures are surfaced for the agent
-to loop back into Take Action.
+`verify_citations(path)` walks an artifact/draft, finds every `@@[id]` token,
+and checks that each id exists in the workspace evidence registry. Returns a
+per-citation pass/fail report; failures are surfaced for the agent to loop
+back into Take Action.
 
 `check_completeness(kind, path)` runs a doctype-specific structural checklist
 (증거인부서, 증인심문사항, 변호인의견서, etc.) and returns missing-section /
@@ -22,15 +22,11 @@ from dataclasses import dataclass, field
 from typing import Iterable, Literal
 
 from ..workspace import Workspace
-from .citation import parse_citation, read_with_anchor
+from .citation import build_id_registry
 
 
-# Looser citation token: matches inline forms like `(json/1.json#p2)` or
-# `wiki-output/concepts/concept-002.md#sec:1-개념-정의` embedded in markdown.
-INLINE_CITE_RE = re.compile(
-    r"(?<![\w/])"                                 # not preceded by path char
-    r"((?:wiki-output|cache|json|sources|txt|artifacts|drafts|notes)/[^\s#)\]]+#[^\s)\]]+)"
-)
+# Inline citation token matching `@@[id]`.
+INLINE_CITE_RE = re.compile(r"@@\[([^\]\s]+)\]")
 
 
 # ---------------------------------------------------------------------------
@@ -72,31 +68,30 @@ class VerifyCitationsResult:
         }
 
 
-def _iter_citations(text: str) -> Iterable[str]:
+def _iter_ids(text: str) -> Iterable[str]:
     seen: set[str] = set()
     for m in INLINE_CITE_RE.finditer(text):
-        c = m.group(1).rstrip(".,;:")
-        if c not in seen:
-            seen.add(c)
-            yield c
+        did = m.group(1)
+        if did not in seen:
+            seen.add(did)
+            yield did
 
 
 def verify_citations(ws: Workspace, path: str) -> VerifyCitationsResult:
-    """Walk an artifact/draft and verify every embedded citation token."""
+    """Walk an artifact/draft and verify every embedded `@@[id]` token."""
     text = ws.read(path)
     reports: list[CitationReport] = []
-    for cite in _iter_citations(text):
-        try:
-            parse_citation(cite)
-        except ValueError as e:
-            reports.append(CitationReport(citation=cite, ok=False, error=f"parse: {e}"))
-            continue
-        try:
-            read_with_anchor(ws, cite, max_chars=80)
-        except (FileNotFoundError, ValueError) as e:
-            reports.append(CitationReport(citation=cite, ok=False, error=str(e)))
-            continue
-        reports.append(CitationReport(citation=cite, ok=True))
+    registry = build_id_registry(ws)
+    for did in _iter_ids(text):
+        cite = f"@@[{did}]"
+        if did in registry:
+            reports.append(CitationReport(citation=cite, ok=True))
+        else:
+            reports.append(
+                CitationReport(
+                    citation=cite, ok=False, error=f"unknown id: {did!r}"
+                )
+            )
     failed = sum(1 for r in reports if not r.ok)
     return VerifyCitationsResult(
         path=path, total=len(reports), failed=failed, reports=reports
@@ -112,8 +107,8 @@ DocKind = Literal[
     "evidence_acknowledgment",  # 증거인부서
     "witness_questions",        # 증인심문사항
     "defendant_questions",      # 피고인심문사항
-    "defense_opinion",          # 변호인 의견서
-    "civil_brief",              # 민사 준비서면
+    "civil_brief",              # 민사 준비서면 (briefs/)
+    "general_brief",            # 범용 서면 (briefs/) — 헤딩 강제 없음
     "evidence_pros_cons",       # 증거 유불리표 (artifact)
     "timeline",                 # 연표 (artifact)
     "issues",                   # 쟁점표 (artifact)
@@ -131,8 +126,8 @@ _REQUIRED_HEADINGS: dict[str, tuple[str, ...]] = {
     "evidence_acknowledgment": ("증거",),
     "witness_questions": ("증인",),
     "defendant_questions": ("피고인",),
-    "defense_opinion": ("사실관계", "법리", "결론"),
     "civil_brief": ("청구", "주장", "결론"),
+    "general_brief": (),
     "evidence_pros_cons": ("증거",),
     "timeline": (),
     "issues": ("쟁점",),
@@ -142,7 +137,7 @@ _REQUIRED_HEADINGS: dict[str, tuple[str, ...]] = {
 # Per-kind body invariants — each is `(rule_name, predicate(text)->bool, hint)`.
 # Predicates are intentionally light; verify_citations covers citation health.
 def _has_min_citations(text: str, n: int) -> bool:
-    return sum(1 for _ in _iter_citations(text)) >= n
+    return sum(1 for _ in _iter_ids(text)) >= n
 
 
 _DECISION_LINE_RE = re.compile(
@@ -174,7 +169,7 @@ _BODY_RULES: dict[str, list[tuple[str, callable, str]]] = {
         ("decision_per_evidence", _evidence_table_complete,
          "각 증거 항목에 동의/부동의/일부부동의 + 이유가 명시되어야 합니다."),
         ("min_citations", lambda t: _has_min_citations(t, 3),
-         "최소 3개 이상의 인용(`path#anchor`)이 필요합니다."),
+         "최소 3개 이상의 인용(`@@[id]`)이 필요합니다."),
     ],
     "witness_questions": [
         ("has_questions", _witness_questions_have_q_mark,
@@ -185,12 +180,11 @@ _BODY_RULES: dict[str, list[tuple[str, callable, str]]] = {
     "defendant_questions": [
         ("min_citations", lambda t: _has_min_citations(t, 2), "최소 2개 인용 필요."),
     ],
-    "defense_opinion": [
-        ("min_citations", lambda t: _has_min_citations(t, 5),
-         "사실관계/법리에 최소 5개 인용이 필요합니다."),
-    ],
     "civil_brief": [
         ("min_citations", lambda t: _has_min_citations(t, 5), "최소 5개 인용 필요."),
+    ],
+    "general_brief": [
+        ("min_citations", lambda t: _has_min_citations(t, 3), "최소 3개 인용 필요."),
     ],
     "evidence_pros_cons": [
         ("min_citations", lambda t: _has_min_citations(t, 3), "최소 3개 인용 필요."),

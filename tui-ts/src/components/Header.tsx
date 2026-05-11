@@ -23,7 +23,7 @@ export function Header({ caseId, model }: Props) {
       <Box flexDirection="column" flexGrow={1} paddingLeft={spacing.xs}>
         <Text bold>Tips</Text>
         <Text dimColor>• smart_search — semantic evidence search</Text>
-        <Text dimColor>• read_with_anchor path#anchor — source section</Text>
+        <Text dimColor>• read_evidence @@[id] — source section</Text>
       </Box>
     </Box>
   );

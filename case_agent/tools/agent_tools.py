@@ -3,7 +3,7 @@
 These complement DeepAgents' built-in filesystem tools (which run against the
 agent's `FilesystemBackend` rooted at the case directory). Our tools enforce
 the lookup priority (wiki → cache → 1-hop KG → json → sources) and the
-single-form citation grammar `path#anchor`.
+single-form citation grammar `@@[id]`.
 
 All tools are case-bound via closure capture of `(workspace, embedder)`.
 """
@@ -18,7 +18,7 @@ from langchain_core.tools import tool
 
 from ..workspace import Workspace
 from .calculate import CalculateTool
-from .citation import list_evidence as _list_evidence, read_with_anchor as _read_with_anchor
+from .citation import list_evidence as _list_evidence, read_evidence as _read_evidence
 from .search import Embedder, smart_search as _smart_search
 from .verify import (
     check_completeness as _check_completeness,
@@ -68,29 +68,51 @@ def build_smart_search_tool(workspace: Workspace, embedder: Embedder):
     return smart_search
 
 
-def build_read_with_anchor_tool(workspace: Workspace):
+def build_read_evidence_tool(workspace: Workspace):
     @tool
-    def read_with_anchor(citation: str, max_chars: int = 4000) -> str:
-        """Read a workspace file region keyed by an anchor.
+    def read_evidence(
+        id: str,
+        start_page: int | None = None,
+        end_page: int | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        section_id: str | None = None,
+        max_chars: int = 4000,
+    ) -> str:
+        """Read a region of an evidence document keyed by ``id``.
 
-        Citation grammar: `path#anchor` where anchor is one of:
-          - `Lstart-Lend`   line range, 1-based (txt files)
-          - `pN`            single page              (json source files)
-          - `pA..B`         inclusive page range    (json source files)
-                            e.g. `json/1.json#p1..5` reads pages 1–5 in one call.
-                            한 번에 여러 페이지를 가져와 토큰을 절약하세요.
-                            범위 구분자는 반드시 `..` 입니다 (`p1-5` ❌, `p1..5` ✅).
-                            반환 스니펫에는 페이지 경계마다 `--- pN ---` 마커가 들어갑니다.
-          - `sec:slug`      heading slug     (markdown wiki files)
+        Citation grammar: `@@[id]` (single id token, no anchor). ``id`` is
+        the value of the top-level ``"id"`` field in the source json file.
+        Get candidate ids from ``list_evidence`` or ``smart_search``.
 
-        Returns JSON with the (canonical) `citation`, the `snippet` text, and `kind`.
-        Use this to FETCH the exact wording you will paste into artifacts/drafts so
-        verify_citations later accepts the citation.
+        Addressing parameters (use at most one mode per call):
+          - ``start_page`` (+ optional ``end_page``) — page range in json source.
+            한 번에 여러 페이지를 가져와 토큰을 절약하세요.
+            반환 스니펫에는 페이지 경계마다 ``--- pN ---`` 마커가 들어갑니다.
+          - ``start_line`` (+ optional ``end_line``) — line range in text files.
+          - ``section_id`` — heading slug (markdown wiki files).
+          - none — return the document's full ``content`` body.
+
+        Returns JSON: ``citation`` (canonical ``@@[id]``), ``id``,
+        ``json_path``, ``snippet`` text, ``kind`` ("page"|"lines"|"section"|"full").
+        Use this to FETCH the exact wording you will paste into
+        artifacts/briefs so ``verify_citations`` later accepts the ``@@[id]``
+        citation. The citation token itself never contains an anchor — page or
+        line context belongs in surrounding prose, not in the citation.
         """
-        out = _read_with_anchor(workspace, citation, max_chars=max_chars)
+        out = _read_evidence(
+            workspace,
+            id,
+            start_page=start_page,
+            end_page=end_page,
+            start_line=start_line,
+            end_line=end_line,
+            section_id=section_id,
+            max_chars=max_chars,
+        )
         return json.dumps(out.to_dict(), ensure_ascii=False)
 
-    return read_with_anchor
+    return read_evidence
 
 
 def build_list_evidence_tool(workspace: Workspace):
@@ -103,8 +125,9 @@ def build_list_evidence_tool(workspace: Workspace):
     ) -> str:
         """Enumerate evidence (json/) with optional filters.
 
-        Each item gives the source_id, title, category, person, page count, the
-        json_path you can `read_with_anchor` against (with `pN` or `pA..B` anchors), and the
+        Each item gives the ``id`` (use this in ``@@[id]`` citations and as
+        the ``id`` argument to ``read_evidence``), title, number (e.g.
+        "갑 제3호증"), category, person, page count, json_path, and the
         wiki_path of its summary md if available. Useful when the user references
         an evidence number or wants a specific class of documents.
         """
@@ -123,12 +146,12 @@ def build_list_evidence_tool(workspace: Workspace):
 def build_verify_citations_tool(workspace: Workspace):
     @tool
     def verify_citations(path: str) -> str:
-        """Verify every `path#anchor` citation embedded in an artifact/draft.
+        """Verify every `@@[id]` citation embedded in an artifact/draft.
 
-        Reads the file at `path`, finds every citation token, attempts to
-        resolve each via `read_with_anchor`, and returns a JSON report with
-        per-citation pass/fail. If `failed > 0`, you MUST fix the failing
-        citations before claiming completion.
+        Reads the file at `path`, finds every `@@[id]` token, checks that
+        each id exists in the workspace evidence registry, and returns a JSON
+        report with per-citation pass/fail. If `failed > 0`, you MUST fix the
+        failing citations before claiming completion.
         """
         return json.dumps(_verify_citations(workspace, path).to_dict(), ensure_ascii=False, indent=2)
 
@@ -144,8 +167,8 @@ def build_check_completeness_tool(workspace: Workspace):
           - 'evidence_acknowledgment'  (증거인부서)
           - 'witness_questions'        (증인심문사항)
           - 'defendant_questions'      (피고인심문사항)
-          - 'defense_opinion'          (변호인 의견서)
-          - 'civil_brief'              (민사 준비서면)
+          - 'civil_brief'              (민사 준비서면, briefs/)
+          - 'general_brief'            (범용 서면, briefs/)
           - 'evidence_pros_cons'       (증거 유불리표 artifact)
           - 'timeline'                 (연표 artifact)
           - 'issues'                   (쟁점표 artifact)
@@ -172,13 +195,15 @@ def build_write_file_tool(workspace: Workspace):
     def write_file(path: str, content: str) -> str:
         """Write ``content`` to a workspace-relative ``path`` (overwrite if exists).
 
-        쓰기 가능 디렉토리: ``artifacts/``, ``audit/``, ``plans/``, ``memory/``,
+        쓰기 가능 디렉토리: ``artifacts/`` (분석 산출물), ``briefs/`` (서면 —
+        민사 준비서면 / 그 외 범용 서면), ``audit/``, ``plans/``, ``memory/``,
         ``state/``, (legacy) ``drafts/``, ``notes/``. ``MEMORY.md`` 는 루트 허용.
         ``wiki-output/``, ``cache/``, ``json/``, ``sources/``, ``txt/`` 는 read-only —
         쓰기 시 에러를 반환합니다.
 
         Args:
-            path: workspace-root-relative path, e.g. ``artifacts/timeline_v1.md``.
+            path: workspace-root-relative path, e.g. ``artifacts/timeline_v1.md``
+                or ``briefs/civil_brief_v1.md``.
             content: full file contents (UTF-8 text). Existing file is overwritten.
 
         Returns:
@@ -194,7 +219,7 @@ def build_case_tools(workspace: Workspace, embedder: Embedder) -> list[Any]:
     """Convenience: every case-aware tool."""
     return [
         build_smart_search_tool(workspace, embedder),
-        build_read_with_anchor_tool(workspace),
+        build_read_evidence_tool(workspace),
         build_list_evidence_tool(workspace),
         build_verify_citations_tool(workspace),
         build_check_completeness_tool(workspace),

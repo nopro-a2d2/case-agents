@@ -1,7 +1,7 @@
 """Explore sub-agent: case-document scout running on Gemini Flash.
 
 Single low-level capability: rip through wiki/cache/json/sources via smart_search
-and read_with_anchor, return citation-rich JSON. No write/edit. No analysis.
+and read_evidence, return citation-rich JSON. No write/edit. No analysis.
 Lives in an isolated context so the main (Sonnet) agent's window stays clean.
 """
 
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..prompts import EXPLORE_SYSTEM_PROMPT
 from ..tools.agent_tools import (
-    build_read_with_anchor_tool,
+    build_read_evidence_tool,
     build_smart_search_tool,
 )
 
@@ -30,7 +30,7 @@ def build_explore_subagent(
 ) -> dict[str, Any]:
     tools: list[Any] = [
         build_smart_search_tool(workspace, embedder),
-        build_read_with_anchor_tool(workspace),
+        build_read_evidence_tool(workspace),
     ]
     sa: dict[str, Any] = {
         "name": "explore",

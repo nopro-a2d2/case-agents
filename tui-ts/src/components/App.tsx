@@ -12,7 +12,8 @@ import { StatusLine } from "./StatusLine.js";
 import { TodoPanel } from "./TodoPanel.js";
 import { WelcomeScreen } from "./WelcomeScreen.js";
 import { PlanApprovalPicker } from "./PlanApprovalPicker.js";
-import { APPROVAL_PROMPT } from "../planApproval.js";
+import { MODE_APPROVAL_PROMPT } from "../planApproval.js";
+import { type ModeState, cycleMode } from "../mode.js";
 
 interface Props {
   bridge: PythonBridge;
@@ -69,11 +70,14 @@ export function App({ bridge, caseId, model }: Props) {
   const [currentAssistant, setCurrentAssistant] = useState<AssistantMessage | null>(null);
   const [isThinking, setIsThinking] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [planMode, setPlanMode] = useState(false);
+  const [mode, setMode] = useState<ModeState>("normal");
   const [awaitingPlanApproval, setAwaitingPlanApproval] = useState(false);
   const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const planTurnInFlightRef = useRef(false);
+  // Records which mode initiated the approval turn so handleApprove /
+  // handleChangePlan know which prompt + force flag to send back.
+  const approvalModeRef = useRef<ModeState>("normal");
 
   const currentAssistantRef = useRef<AssistantMessage | null>(null);
   useEffect(() => { currentAssistantRef.current = currentAssistant; }, [currentAssistant]);
@@ -184,7 +188,7 @@ export function App({ bridge, caseId, model }: Props) {
           setTodos([]);
           setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
           setAwaitingPlanApproval(false);
-          setPlanMode(false);
+          setMode("normal");
           planTurnInFlightRef.current = false;
           break;
         }
@@ -226,7 +230,7 @@ export function App({ bridge, caseId, model }: Props) {
 
   useInput((_input, key) => {
     if (key.ctrl && _input === "c") process.exit(0);
-    if (key.shift && key.tab) setPlanMode((on) => !on);
+    if (key.shift && key.tab) setMode(cycleMode);
   });
 
   const resetSession = useCallback(() => {
@@ -237,48 +241,63 @@ export function App({ bridge, caseId, model }: Props) {
     setTodos([]);
     setTokenUsage({ input: 0, output: 0, cacheRead: 0 });
     setAwaitingPlanApproval(false);
-    setPlanMode(false);
+    setMode("normal");
     planTurnInFlightRef.current = false;
   }, []);
 
   const handleSubmit = useCallback((prompt: string) => {
     if (prompt.trim() === "/clear") {
       resetSession();
-      bridge.send(prompt, { forceStrategy: false });
+      bridge.send(prompt, { forceStrategy: false, forceBrief: false });
       return;
     }
     const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
-    if (planMode) planTurnInFlightRef.current = true;
-    bridge.send(prompt, { forceStrategy: planMode });
-  }, [bridge, planMode, resetSession]);
+    if (mode === "strategy" || mode === "brief") {
+      planTurnInFlightRef.current = true;
+      approvalModeRef.current = mode;
+    }
+    bridge.send(prompt, {
+      forceStrategy: mode === "strategy",
+      forceBrief: mode === "brief",
+    });
+  }, [bridge, mode, resetSession]);
 
   const handleAbort = useCallback(() => {
     bridge.abort();
   }, [bridge]);
 
   const handleApprove = useCallback(() => {
+    // approvalModeRef is set to "strategy" or "brief" in handleSubmit before
+    // the approval gate can appear, so this cast is safe at runtime.
+    const approvalMode = approvalModeRef.current as keyof typeof MODE_APPROVAL_PROMPT;
+    const prompt = MODE_APPROVAL_PROMPT[approvalMode];
     setAwaitingPlanApproval(false);
-    setPlanMode(false);
-    const userMsg: Message = { role: "user", text: APPROVAL_PROMPT };
+    setMode("normal");
+    const userMsg: Message = { role: "user", text: prompt };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
     planTurnInFlightRef.current = false;
-    bridge.send(APPROVAL_PROMPT, { forceStrategy: false });
+    bridge.send(prompt, { forceStrategy: false, forceBrief: false });
   }, [bridge]);
 
   const handleReject = useCallback(() => {
+    // Close the picker but keep the originating mode active.
     setAwaitingPlanApproval(false);
   }, []);
 
   const handleChangePlan = useCallback((text: string) => {
+    const approvalMode = approvalModeRef.current;
     setAwaitingPlanApproval(false);
     const userMsg: Message = { role: "user", text };
     setCompletedMessages((msgs) => [...msgs, userMsg]);
     setIsThinking(true);
     planTurnInFlightRef.current = true;
-    bridge.send(text, { forceStrategy: true });
+    bridge.send(text, {
+      forceStrategy: approvalMode === "strategy",
+      forceBrief: approvalMode === "brief",
+    });
   }, [bridge]);
 
   const showWelcome =
@@ -310,9 +329,9 @@ export function App({ bridge, caseId, model }: Props) {
           disabled={isThinking}
         />
       ) : (
-        <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} planMode={planMode} skills={skills} />
+        <PromptInput onSubmit={handleSubmit} onAbort={handleAbort} disabled={isThinking} mode={mode} skills={skills} />
       )}
-      <StatusLine planMode={planMode} />
+      <StatusLine mode={mode} />
     </Box>
   );
 }

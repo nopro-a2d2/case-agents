@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { colors, glyphs, spacing } from "../theme.js";
 
 const TOOL_GROUPS: Array<{ label: string; items: string }> = [
-  { label: "Search ", items: "smart_search · read_with_anchor · list_evidence" },
+  { label: "Search ", items: "smart_search · read_evidence · list_evidence" },
   { label: "Verify ", items: "verify_citations · check_completeness" },
   { label: "Compute", items: "calculate" },
   { label: "Memory ", items: "read_memory_index · read_memory · write_memory" },

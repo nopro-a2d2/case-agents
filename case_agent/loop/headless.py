@@ -140,7 +140,12 @@ async def headless_loop(case: str, root: str) -> None:
     abort_event = asyncio.Event()
     run_task: asyncio.Task[None] | None = None
 
-    async def run_turn(prompt: str, force_strategy: bool, abort: asyncio.Event) -> None:
+    async def run_turn(
+        prompt: str,
+        force_strategy: bool,
+        force_brief: bool,
+        abort: asyncio.Event,
+    ) -> None:
         nonlocal history
         history.append(HumanMessage(content=prompt))
         async for ev in stream_query(
@@ -149,6 +154,7 @@ async def headless_loop(case: str, root: str) -> None:
             messages=history,
             abort=abort,
             force_strategy=force_strategy,
+            force_brief=force_brief,
             session_id=chat_session_id,
         ):
             _emit(ev)
@@ -179,6 +185,7 @@ async def headless_loop(case: str, root: str) -> None:
 
         prompt: str = payload.get("prompt", "")
         force_strategy: bool = bool(payload.get("force_strategy", False))
+        force_brief: bool = bool(payload.get("force_brief", False))
         if not prompt:
             continue
 
@@ -214,7 +221,9 @@ async def headless_loop(case: str, root: str) -> None:
             continue
 
         abort_event = asyncio.Event()
-        run_task = asyncio.create_task(run_turn(prompt, force_strategy, abort_event))
+        run_task = asyncio.create_task(
+            run_turn(prompt, force_strategy, force_brief, abort_event)
+        )
 
     # On EOF, wait for any in-flight turn to wind down so we don't truncate output.
     if run_task and not run_task.done():

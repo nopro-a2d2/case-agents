@@ -75,12 +75,16 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
         abort_event = asyncio.Event()
         run_task: asyncio.Task[None] | None = None
 
-        async def run_turn(prompt: str, force_strategy: bool) -> None:
+        async def run_turn(
+            prompt: str,
+            force_strategy: bool,
+            force_brief: bool,
+        ) -> None:
             nonlocal history
             history.append(HumanMessage(content=prompt))
             logger.info(
-                "ws turn start prompt=%r force_strategy=%s history_len=%d",
-                prompt[:80], force_strategy, len(history),
+                "ws turn start prompt=%r force_strategy=%s force_brief=%s history_len=%d",
+                prompt[:80], force_strategy, force_brief, len(history),
             )
             event_count = 0
             try:
@@ -90,6 +94,7 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                     messages=history,
                     abort=abort_event,
                     force_strategy=force_strategy,
+                    force_brief=force_brief,
                     session_id=chat_session_id,
                 ):
                     event_count += 1
@@ -163,6 +168,7 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
 
                 prompt = expand_slash(prompt, components.skills)
                 force_strategy = bool(payload.get("force_strategy", False))
+                force_brief = bool(payload.get("force_brief", False))
 
                 # Drop if a previous turn is still running.
                 if run_task and not run_task.done():
@@ -172,7 +178,9 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
                     continue
 
                 abort_event = asyncio.Event()
-                run_task = asyncio.create_task(run_turn(prompt, force_strategy))
+                run_task = asyncio.create_task(
+                    run_turn(prompt, force_strategy, force_brief)
+                )
         except WebSocketDisconnect:
             abort_event.set()
             if run_task:

@@ -61,14 +61,14 @@ def test_offline_qna_pipeline_end_to_end(ws: LocalFS) -> None:
     ws.write(
         artifact_path,
         "# 고발장 핵심 주장 요약 (offline e2e)\n\n"
-        "1. 일감몰아주기 의혹: KDFS의 KT텔레캅 물량이 16년 45억 → 22년 490억대로 증가했다는 주장 (json/1.json#p2).\n"
-        "2. 고발취지: 시민단체 '정의로운 사람들'이 형법상 배임 등의 혐의로 고발 (json/1.json#p1).\n"
-        "3. 결론: 정당하고 신속하고 철저한 수사를 요청 (json/1.json#p3).\n",
+        "1. 일감몰아주기 의혹: KDFS의 KT텔레캅 물량이 16년 45억 → 22년 490억대로 증가했다는 주장 (@@[1]).\n"
+        "2. 고발취지: 시민단체 '정의로운 사람들'이 형법상 배임 등의 혐의로 고발 (@@[1]).\n"
+        "3. 결론: 정당하고 신속하고 철저한 수사를 요청 (@@[1]).\n",
     )
 
-    # ---- ③ Verify: every citation must resolve via read_with_anchor ----
+    # ---- ③ Verify: every @@[id] must resolve against the id registry ----
     rep = verify_citations(ws, artifact_path)
-    assert rep.total == 3
+    assert rep.total == 1  # all three @@[1] occurrences dedupe to one
     assert rep.failed == 0
     assert rep.ok is True
 

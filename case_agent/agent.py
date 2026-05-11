@@ -15,6 +15,7 @@ from .commands import Command, CommandHandler, discover_commands
 from .model import VertexEmbedderAdapter, build_embedder, build_heavy, build_light
 from .prompts import MAIN_SYSTEM_PROMPT
 from .skills import Skill, discover_skills
+from .loop.task_tool import build_task_tool, build_task_tool_for_subagent
 from .skills.prompt import build_skill_listing
 from .subagents import discover_subagents
 from .tools import TodoStore, build_all_tools
@@ -87,8 +88,16 @@ def build_case_agent_components(
         workspace, emb, model=sub_model
     )
 
-    # Wire the task tool last so the registry it captures is final.
-    from .loop.task_tool import build_task_tool
+    # brief subagents get an explore-only `task` tool to prevent recursive brief delegation.
+    if "explore" in subagents:
+        restricted_task = build_task_tool_for_subagent(
+            subagents=subagents,
+            allowed={"explore"},
+            fallback_model=sub_model,
+        )
+        for name, sa in subagents.items():
+            if name.startswith("brief_"):
+                sa["tools"] = list(sa.get("tools") or []) + [restricted_task]
 
     case_tools.append(build_task_tool(subagents=subagents, fallback_model=sub_model))
 

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { ModeState } from "../mode.js";
 import type { SkillEntry } from "../types.js";
 
 interface Props {
   onSubmit: (value: string) => void;
   onAbort: () => void;
-  onTogglePlanMode: () => void;
+  onToggleMode: () => void;
   disabled?: boolean;
-  planMode?: boolean;
+  mode?: ModeState;
   skills?: SkillEntry[];
 }
 
@@ -15,9 +16,9 @@ const MAX_VISIBLE = 16;
 export function PromptInput({
   onSubmit,
   onAbort,
-  onTogglePlanMode,
+  onToggleMode,
   disabled = false,
-  planMode = false,
+  mode = "normal",
   skills = [],
 }: Props) {
   const [value, setValue] = useState("");
@@ -105,7 +106,7 @@ export function PromptInput({
 
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
-      onTogglePlanMode();
+      onToggleMode();
       return;
     }
     if (e.key === "Escape") {
@@ -125,7 +126,12 @@ export function PromptInput({
     }
   };
 
-  const borderColor = planMode ? "rgb(var(--c-plan-mode))" : "rgb(var(--c-border-prompt))";
+  const borderColor =
+    mode === "strategy"
+      ? "rgb(var(--c-plan-mode))"
+      : mode === "brief"
+      ? "rgb(var(--c-brief-mode))"
+      : "rgb(var(--c-border-prompt))";
   const promptColor = disabled ? "rgb(0 0 0 / 0.55)" : "rgb(var(--c-user-prefix))";
 
   // Active row tint — light blue accent. Falls back to a neutral dim if the
@@ -206,7 +212,7 @@ export function PromptInput({
           rows={1}
           value={value}
           disabled={disabled}
-          placeholder={disabled ? "…  (Esc to abort)" : "Type a message — Enter to send, / for slash command, Shift+Tab for plan mode"}
+          placeholder={disabled ? "…  (Esc to abort)" : "Type a message — Enter to send, / for slash command, Shift+Tab cycle (normal → strategy → brief)"}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           className="flex-1 bg-transparent outline-none resize-none font-mono"

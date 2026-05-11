@@ -2,25 +2,24 @@
 
 Citation grammar (single canonical form used everywhere):
 
-    {workspace_path}#{anchor}
+    @@[id]
 
-where anchor is one of:
-    L<a>-<b>          line range, 1-based inclusive  (txt files)
-    p<n>              page number                    (json source files)
-    p<a>..<b>         page range, inclusive          (json source files)
-    sec:<heading-id>  markdown heading slug          (wiki md files)
+``id`` is the value of the top-level ``"id"`` field in the source evidence
+JSON file (under ``json/<file>.json``). Examples:
 
-Examples:
-    json/1.json#p2
-    json/1.json#p1..5
-    sources/공소장.txt#L120-L145
-    wiki-output/concepts/concept-002.md#sec:1-개념-정의
+    @@[1]
+    @@[cdoc_01KKH4TTAG000000000000000S]
 
-`read_with_anchor` reads a file region keyed by an anchor and returns both
-the snippet and a normalized citation string (so the agent can paste it back
-into artifacts/drafts verbatim and `verify_citations` will accept it).
+There are no page/line/section anchors in the citation token itself. When the
+agent needs a specific page, line range, or wiki-md section, it passes them as
+**arguments to** ``read_evidence`` — they are NOT embedded in the citation
+that appears in artifacts/briefs.
 
-`list_evidence` enumerates all evidence (json source files) with metadata.
+``read_evidence`` reads a region of an evidence document keyed by ``id``
+plus optional page/line/section parameters. It returns the snippet plus the
+canonical ``@@[id]`` citation the agent can paste verbatim.
+
+``list_evidence`` enumerates all evidence (json source files) with metadata.
 """
 
 from __future__ import annotations
@@ -28,40 +27,83 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Iterable
 
 from ..workspace import Workspace
 
 
 # ---------------------------------------------------------------------------
-# Anchor parsing
+# Citation parsing
 # ---------------------------------------------------------------------------
 
 
-CITE_RE = re.compile(r"^(?P<path>[^\s#]+)#(?P<anchor>\S+)$")
-LINE_RE = re.compile(r"^L(?P<start>\d+)(?:-L?(?P<end>\d+))?$")
-PAGE_RE = re.compile(r"^p(?P<start>\d+)(?:\.\.(?P<end>\d+))?$")
-SEC_RE = re.compile(r"^sec:(?P<slug>.+)$")
+CITE_RE = re.compile(r"^@@\[(?P<id>[^\]\s]+)\]$")
 
 
 @dataclass(slots=True)
 class Citation:
-    path: str
-    anchor: str
+    id: str
 
-    def __str__(self) -> str:  # noqa: DUNDER
-        return f"{self.path}#{self.anchor}"
+    def __str__(self) -> str:
+        return f"@@[{self.id}]"
 
 
 def parse_citation(s: str) -> Citation:
     m = CITE_RE.match(s.strip())
     if not m:
         raise ValueError(f"not a citation: {s!r}")
-    return Citation(path=m.group("path"), anchor=m.group("anchor"))
+    return Citation(id=m.group("id"))
 
 
 # ---------------------------------------------------------------------------
-# Heading slug for wiki anchors
+# id registry
+# ---------------------------------------------------------------------------
+
+
+_REGISTRY_ATTR = "_id_registry"
+
+
+def build_id_registry(ws: Workspace) -> dict[str, str]:
+    """Return ``{id: json_path}`` over every ``json/*.json`` evidence file.
+
+    Cached on the workspace instance after the first call. Raises on duplicate
+    ids (corrupt case data) so the agent fails fast rather than citing the
+    wrong document.
+    """
+    cached = getattr(ws, _REGISTRY_ATTR, None)
+    if cached is not None:
+        return cached
+    out: dict[str, str] = {}
+    for jp in ws.glob("json/*.json"):
+        try:
+            doc = json.loads(ws.read(jp))
+        except Exception:
+            continue
+        raw = doc.get("id")
+        if raw in (None, ""):
+            continue
+        did = str(raw)
+        if did in out and out[did] != jp:
+            raise ValueError(
+                f"duplicate id {did!r}: {out[did]} and {jp}"
+            )
+        out[did] = jp
+    try:
+        setattr(ws, _REGISTRY_ATTR, out)
+    except (AttributeError, TypeError):
+        pass
+    return out
+
+
+def resolve_id(ws: Workspace, id: str) -> str:
+    """Return the workspace-relative json path for ``id``."""
+    reg = build_id_registry(ws)
+    if id not in reg:
+        raise KeyError(f"unknown id: {id!r}")
+    return reg[id]
+
+
+# ---------------------------------------------------------------------------
+# Heading slug for wiki anchors (still used by read_evidence section= param)
 # ---------------------------------------------------------------------------
 
 
@@ -91,42 +133,65 @@ def _md_heading_slugs(md_text: str) -> dict[str, tuple[int, int]]:
 
 
 # ---------------------------------------------------------------------------
-# read_with_anchor
+# read_evidence
 # ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
-class AnchorRead:
-    citation: str
+class EvidenceRead:
+    citation: str  # canonical `@@[id]`
+    id: str
+    json_path: str
     snippet: str
-    kind: str  # "lines" | "page" | "section"
+    kind: str  # "page" | "lines" | "section" | "full"
 
     def to_dict(self) -> dict:
-        return {"citation": self.citation, "snippet": self.snippet, "kind": self.kind}
+        return {
+            "citation": self.citation,
+            "id": self.id,
+            "json_path": self.json_path,
+            "snippet": self.snippet,
+            "kind": self.kind,
+        }
 
 
-def read_with_anchor(ws: Workspace, citation: str, *, max_chars: int = 4000) -> AnchorRead:
-    """Read a region of a workspace file keyed by anchor."""
-    cit = parse_citation(citation)
-    path = cit.path
-    anchor = cit.anchor
+def read_evidence(
+    ws: Workspace,
+    id: str,
+    *,
+    start_page: int | None = None,
+    end_page: int | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    section_id: str | None = None,
+    max_chars: int = 4000,
+) -> EvidenceRead:
+    """Read a region of an evidence document keyed by ``id``.
 
-    if (m := LINE_RE.match(anchor)):
-        start = int(m.group("start"))
-        end = int(m.group("end") or m.group("start"))
-        text = ws.read(path, range=(start, end))
-        return AnchorRead(citation=str(cit), snippet=text[:max_chars], kind="lines")
+    Exactly one of the following addressing modes may be used per call:
+      * ``start_page`` (with optional ``end_page``) — read by page in json source.
+      * ``start_line`` (with optional ``end_line``) — read by line range.
+      * ``section_id`` — wiki-md heading slug (e.g. ``"1-개념-정의"``).
+      * None of the above — return the full json ``content`` body.
+    """
+    json_path = resolve_id(ws, id)
+    addressing_modes = sum(
+        x is not None
+        for x in (start_page, start_line, section_id)
+    )
+    if addressing_modes > 1:
+        raise ValueError(
+            "specify at most one of start_page / start_line / section_id"
+        )
 
-    if (m := PAGE_RE.match(anchor)):
-        if not path.endswith(".json"):
-            raise ValueError(f"page anchor only valid on .json files, not {path}")
-        start_page = int(m.group("start"))
-        end_page = int(m.group("end")) if m.group("end") else start_page
+    if start_page is not None:
+        if end_page is None:
+            end_page = start_page
         if start_page > end_page:
             raise ValueError(
-                f"invalid page range: p{start_page}..{end_page} (start > end)"
+                f"invalid page range: {start_page}..{end_page} (start > end)"
             )
-        doc = json.loads(ws.read(path))
+        doc = json.loads(ws.read(json_path))
         parts: list[str] = []
         last_page: int | None = None
         for blk in doc.get("content", []):
@@ -138,28 +203,59 @@ def read_with_anchor(ws: Workspace, citation: str, *, max_chars: int = 4000) -> 
                 parts.append(str(blk.get("text", "")))
         if not parts:
             if start_page == end_page:
-                raise ValueError(f"page {start_page} not found in {path}")
+                raise ValueError(f"page {start_page} not found in {json_path}")
             raise ValueError(
-                f"page range {start_page}..{end_page} not found in {path}"
+                f"page range {start_page}..{end_page} not found in {json_path}"
             )
-        norm_anchor = f"p{start_page}" if start_page == end_page else f"p{start_page}..{end_page}"
-        norm_cit = Citation(path=path, anchor=norm_anchor)
         snippet = "\n\n".join(parts)
-        return AnchorRead(citation=str(norm_cit), snippet=snippet[:max_chars], kind="page")
+        return EvidenceRead(
+            citation=f"@@[{id}]",
+            id=id,
+            json_path=json_path,
+            snippet=snippet[:max_chars],
+            kind="page",
+        )
 
-    if (m := SEC_RE.match(anchor)):
-        slug = m.group("slug").strip()
-        text = ws.read(path)
+    if start_line is not None:
+        if end_line is None:
+            end_line = start_line
+        text = ws.read(json_path, range=(start_line, end_line))
+        return EvidenceRead(
+            citation=f"@@[{id}]",
+            id=id,
+            json_path=json_path,
+            snippet=text[:max_chars],
+            kind="lines",
+        )
+
+    if section_id is not None:
+        text = ws.read(json_path)
         slugs = _md_heading_slugs(text)
-        if slug not in slugs:
-            raise ValueError(f"section slug {slug!r} not found in {path}")
-        start, end = slugs[slug]
-        snippet = "\n".join(text.splitlines()[start - 1 : end])
-        return AnchorRead(citation=str(cit), snippet=snippet[:max_chars], kind="section")
+        if section_id not in slugs:
+            raise ValueError(f"section slug {section_id!r} not found in {json_path}")
+        s, e = slugs[section_id]
+        snippet = "\n".join(text.splitlines()[s - 1 : e])
+        return EvidenceRead(
+            citation=f"@@[{id}]",
+            id=id,
+            json_path=json_path,
+            snippet=snippet[:max_chars],
+            kind="section",
+        )
 
-    raise ValueError(
-        f"unsupported anchor: {anchor!r}. "
-        f"Valid forms: Lstart-Lend | pN | pA..B | sec:slug"
+    # full document fallback — read whole json content
+    doc = json.loads(ws.read(json_path))
+    content = doc.get("content")
+    if isinstance(content, list):
+        snippet = "\n".join(str(blk.get("text", "")) for blk in content)
+    else:
+        snippet = str(content or "")
+    return EvidenceRead(
+        citation=f"@@[{id}]",
+        id=id,
+        json_path=json_path,
+        snippet=snippet[:max_chars],
+        kind="full",
     )
 
 
@@ -170,18 +266,20 @@ def read_with_anchor(ws: Workspace, citation: str, *, max_chars: int = 4000) -> 
 
 @dataclass(slots=True)
 class EvidenceItem:
-    source_id: str            # "1", "공소장", ...
+    id: str
     title: str
+    number: str | None         # e.g. "갑 제3호증" if present
     category: str | None
     person: str | None
     pages: int | None
-    json_path: str            # "json/1.json"
-    wiki_path: str | None     # "wiki-output/sources/source-1.md" if it exists
+    json_path: str
+    wiki_path: str | None
 
     def to_dict(self) -> dict:
         return {
-            "source_id": self.source_id,
+            "id": self.id,
             "title": self.title,
+            "number": self.number,
             "category": self.category,
             "person": self.person,
             "pages": self.pages,
@@ -207,8 +305,9 @@ def list_evidence(
             doc = json.loads(ws.read(jp))
         except Exception:
             continue
-        sid = str(doc.get("id", ""))
+        did = str(doc.get("id", ""))
         title = str(doc.get("name", "") or doc.get("title", ""))
+        number = doc.get("number")
         cat = doc.get("category")
         pers = doc.get("person")
         pages = doc.get("total_page")
@@ -218,11 +317,12 @@ def list_evidence(
             continue
         if name_contains and name_contains not in title:
             continue
-        wiki = f"wiki-output/sources/source-{sid}.md"
+        wiki = f"wiki-output/sources/source-{did}.md"
         out.append(
             EvidenceItem(
-                source_id=sid,
+                id=did,
                 title=title,
+                number=number if number else None,
                 category=cat,
                 person=pers,
                 pages=int(pages) if pages is not None else None,

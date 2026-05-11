@@ -2,7 +2,7 @@
 name: timeline_draft
 description: Draft a chronological timeline artifact from existing case evidence with citations.
 when_to_use: When the user asks for a timeline (연표) and one does not yet exist.
-allowed-tools: smart_search, read_with_anchor, list_evidence, write_file, verify_citations
+allowed-tools: smart_search, read_evidence, list_evidence, write_file, verify_citations
 argument-hint: <focus> (e.g. defendant name, period, issue keyword)
 ---
 
@@ -22,7 +22,7 @@ You were invoked to draft a new timeline artifact.
    evidence; fall back to sources only when needed.
 2. **Order** — sort by absolute date. Resolve relative dates ("그 다음 날") to
    absolute when context permits; otherwise keep them with a `~` prefix.
-3. **Cite** — every row carries at least one `path#anchor` citation that
+3. **Cite** — every row carries at least one `@@[id]` citation that
    `verify_citations` will accept.
 4. **Write** — `write_file(path="artifacts/timeline_<focus_slug>_v1.md", ...)`
    with this shape:
@@ -31,7 +31,7 @@ You were invoked to draft a new timeline artifact.
 
    | 일시 | 사건 | 출처 |
    |------|------|------|
-   | 2024-03-12 | ... | json/3.json#p4 |
+   | 2024-03-12 | ... | @@[3] |
    ```
 5. **Verify** — call `verify_citations(path=...)` on the written artifact.
    If failures, fix in-place and re-verify until clean. Do not deliver a

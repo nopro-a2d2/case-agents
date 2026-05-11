@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
 
-from .tools.citation import list_evidence, read_with_anchor
+from .tools.citation import list_evidence as _list_evidence, read_evidence as _read_evidence
 from .tools.search import smart_search
 from .tools.verify import check_completeness, verify_citations
 from .workspace import LocalFS
@@ -87,7 +87,7 @@ def evidence(
 ) -> None:
     """List evidence (json/) with optional filters. No GCP needed."""
     ws = _ws(case, root)
-    items = list_evidence(ws, name_contains=name, person=person, limit=limit)
+    items = _list_evidence(ws, name_contains=name, person=person, limit=limit)
     console.print(
         JSON(json.dumps([it.to_dict() for it in items], ensure_ascii=False))
     )
@@ -95,14 +95,24 @@ def evidence(
 
 @app.command()
 def cite(
-    citation: Annotated[str, typer.Argument(help="path#anchor (e.g. json/1.json#p2)")],
+    id: Annotated[str, typer.Argument(help="value of the evidence json `id` field (e.g. 1, cdoc_01KK...)")],
+    start_page: Annotated[int | None, typer.Option("--start-page", "-p")] = None,
+    end_page: Annotated[int | None, typer.Option("--end-page")] = None,
+    section_id: Annotated[str | None, typer.Option("--section-id")] = None,
     case: Annotated[str, typer.Option("--case", "-c")] = "spark",
     root: Annotated[str, typer.Option("--root")] = "data",
     chars: Annotated[int, typer.Option("--chars")] = 1500,
 ) -> None:
-    """Read a workspace file region by anchor. No GCP needed."""
+    """Read a region of an evidence document by id. No GCP needed."""
     ws = _ws(case, root)
-    out = read_with_anchor(ws, citation, max_chars=chars)
+    out = _read_evidence(
+        ws,
+        id,
+        start_page=start_page,
+        end_page=end_page,
+        section_id=section_id,
+        max_chars=chars,
+    )
     console.print(Panel(out.snippet, title=f"{out.citation}  ({out.kind})"))
 
 

@@ -62,50 +62,26 @@ def test_smart_search_label(ws: LocalFS) -> None:
     assert label == {"action": "자료 검색", "subject": "피고인 인적사항"}
 
 
-def test_read_with_anchor_entity(ws: LocalFS) -> None:
+def test_read_evidence_name_only_when_number_matches(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/entities/entity-310.md"},
-    )
-    assert label == {"action": "문서 검토", "subject": "윤경림 엔티티 확인"}
-
-
-def test_read_with_anchor_concept_with_section_anchor(ws: LocalFS) -> None:
-    label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/concepts/concept-002.md#sec:1-개념-정의"},
-    )
-    assert label == {"action": "문서 검토", "subject": "업무상 배임 개념 확인 (§1-개념-정의)"}
-
-
-def test_read_with_anchor_concept_no_anchor(ws: LocalFS) -> None:
-    label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/concepts/concept-002.md"},
-    )
-    assert label == {"action": "문서 검토", "subject": "업무상 배임 개념 확인"}
-
-
-def test_read_with_anchor_source_uses_name_only_when_number_matches(ws: LocalFS) -> None:
-    label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/sources/source-cdoc_AAA19.md"},
+        "read_evidence",
+        {"id": "cdoc_AAA19"},
     )
     assert label == {"action": "문서 검토", "subject": "석명준비명령"}
 
 
-def test_read_with_anchor_source_combines_number_and_name(ws: LocalFS) -> None:
+def test_read_evidence_combines_number_and_name(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/sources/source-cdoc_BBB.md"},
+        "read_evidence",
+        {"id": "cdoc_BBB"},
     )
     assert label == {"action": "문서 검토", "subject": "갑 제3-3호증 : 등기사항전부증명서"}
 
 
-def test_read_with_anchor_json_path_resolves_via_filename_stem(ws: LocalFS) -> None:
+def test_read_evidence_with_start_page(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "json/갑3-3.json#p1"},
+        "read_evidence",
+        {"id": "cdoc_BBB", "start_page": 1},
     )
     assert label == {
         "action": "문서 검토",
@@ -113,10 +89,10 @@ def test_read_with_anchor_json_path_resolves_via_filename_stem(ws: LocalFS) -> N
     }
 
 
-def test_read_with_anchor_json_page_range(ws: LocalFS) -> None:
+def test_read_evidence_with_page_range(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "json/갑3-3.json#p1..5"},
+        "read_evidence",
+        {"id": "cdoc_BBB", "start_page": 1, "end_page": 5},
     )
     assert label == {
         "action": "문서 검토",
@@ -124,20 +100,23 @@ def test_read_with_anchor_json_page_range(ws: LocalFS) -> None:
     }
 
 
-def test_read_with_anchor_line_anchor(ws: LocalFS) -> None:
+def test_read_evidence_with_section_id(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "txt/something.txt#L120-L145"},
+        "read_evidence",
+        {"id": "cdoc_BBB", "section_id": "1-개념-정의"},
     )
-    assert label == {"action": "문서 검토", "subject": "txt/something.txt (L120-L145)"}
+    assert label == {
+        "action": "문서 검토",
+        "subject": "갑 제3-3호증 : 등기사항전부증명서 (§1-개념-정의)",
+    }
 
 
-def test_unknown_path_falls_back_to_path(ws: LocalFS) -> None:
+def test_read_evidence_unknown_doc_falls_back_to_id(ws: LocalFS) -> None:
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "txt/something.txt#L1-L5"},
+        "read_evidence",
+        {"id": "cdoc_UNKNOWN"},
     )
-    assert label == {"action": "문서 검토", "subject": "txt/something.txt (L1-L5)"}
+    assert label == {"action": "문서 검토", "subject": "cdoc_UNKNOWN"}
 
 
 def test_list_evidence_empty_filters(ws: LocalFS) -> None:
@@ -182,9 +161,9 @@ def test_missing_registry_files_does_not_crash(tmp_path: Path) -> None:
     case = tmp_path / "empty-case"
     case.mkdir()
     ws = LocalFS(case_id="empty-case", root=str(tmp_path))
+    # Even with no json/ dir, read_evidence label falls back to bare id.
     label = build_label_fn(ws)(
-        "read_with_anchor",
-        {"citation": "wiki-output/entities/entity-001.md"},
+        "read_evidence",
+        {"id": "cdoc_X"},
     )
-    # Falls back to bare id when registry is unreadable.
-    assert label == {"action": "문서 검토", "subject": "entity-001"}
+    assert label == {"action": "문서 검토", "subject": "cdoc_X"}

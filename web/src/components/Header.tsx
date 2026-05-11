@@ -19,7 +19,7 @@ export function Header({ caseId, model }: Props) {
       <div className="flex flex-col flex-1 pl-2">
         <span className="font-bold">Tips</span>
         <span className="opacity-60">• smart_search — semantic evidence search</span>
-        <span className="opacity-60">• read_with_anchor path#anchor — source section</span>
+        <span className="opacity-60">• read_evidence @@[id] — source section</span>
       </div>
     </div>
   );

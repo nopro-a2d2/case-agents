@@ -1,10 +1,12 @@
+import type { ModeState } from "../mode.js";
+
 interface Props {
-  planMode?: boolean;
+  mode?: ModeState;
   thinking?: boolean;
   connected?: boolean;
 }
 
-export function StatusLine({ planMode = false, thinking = false, connected = true }: Props) {
+export function StatusLine({ mode = "normal", thinking = false, connected = true }: Props) {
   if (!connected) {
     return (
       <div className="px-4 py-1">
@@ -12,11 +14,20 @@ export function StatusLine({ planMode = false, thinking = false, connected = tru
       </div>
     );
   }
-  if (planMode) {
+  if (mode === "strategy") {
     return (
       <div className="px-4 py-1">
         <span style={{ color: "rgb(var(--c-plan-mode))" }}>
-          ⏵⏵ plan mode on · shift+tab to exit
+          ⏵⏵ strategy mode on · shift+tab → brief
+        </span>
+      </div>
+    );
+  }
+  if (mode === "brief") {
+    return (
+      <div className="px-4 py-1">
+        <span style={{ color: "rgb(var(--c-brief-mode))" }}>
+          ✎ brief mode on · shift+tab → normal
         </span>
       </div>
     );
@@ -25,8 +36,8 @@ export function StatusLine({ planMode = false, thinking = false, connected = tru
     <div className="px-4 py-1 opacity-60">
       <span>
         {thinking
-          ? "esc to abort · shift+tab for plan mode"
-          : "enter to send · shift+tab for plan mode"}
+          ? "esc to abort · shift+tab cycle (normal → strategy → brief)"
+          : "enter to send · shift+tab cycle (normal → strategy → brief)"}
       </span>
     </div>
   );

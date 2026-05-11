@@ -54,14 +54,14 @@ class CalculateTool(BaseTool):
     """Python sandbox calculator — runs code in a restricted namespace.
 
     Usage: extract numbers from case sources, pass them as Python code.
-    Always cite the source of each number (e.g. json/1.json#p3) in the code
-    as a comment so the calculation is traceable to evidence.
+    Always cite the source of each number (e.g. @@[1]) in the code as a
+    comment so the calculation is traceable to evidence.
 
     Example::
 
         code: |
-          ebitda = 10  # json/감정평가.json#p5
-          multiple = 7.2  # wiki-output/concepts/ev-ebitda.md#sec:1
+          ebitda = 10  # @@[감정평가]  (제5쪽)
+          multiple = 7.2  # @@[ev-ebitda]
           _result = ebitda * multiple
 
     Returns JSON: {"result": <value>, "stdout": <print output>, "error": <msg or null>}

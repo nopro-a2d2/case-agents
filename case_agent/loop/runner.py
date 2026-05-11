@@ -10,6 +10,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from .brief_mode import BRIEF_FORCE_REMINDER
 from .labels import build_label_fn
 from .query import DEFAULT_MAX_TURNS, initial_messages, query
 from .strategy_mode import STRATEGY_FORCE_REMINDER
@@ -48,6 +49,7 @@ async def stream_query(
     abort: asyncio.Event | None = None,
     stream_timeout: float | None = None,
     force_strategy: bool = False,
+    force_brief: bool = False,
     callbacks: list | None = None,
     session_id: str | None = None,
     user_id: str | None = None,
@@ -57,11 +59,19 @@ async def stream_query(
 
     When ``force_strategy`` is True, the system prompt for *this turn* is
     composed with ``STRATEGY_FORCE_REMINDER`` so the model is pushed to call
-    ``enter_strategy_mode`` as its first action. Toggling the flag off on a
-    later turn restores the base system prompt — no history pollution.
+    ``enter_strategy_mode`` as its first action. When ``force_brief`` is True,
+    ``BRIEF_FORCE_REMINDER`` is used instead so the model is pushed toward
+    ``enter_brief_mode``. Both flags are mutually exclusive (UI is enum); if
+    both arrive True the brief flag wins. Toggling either flag off on a later
+    turn restores the base system prompt — no history pollution.
     """
     system_prompt = components.system_prompt
-    system_extra = STRATEGY_FORCE_REMINDER if force_strategy else None
+    if force_brief:
+        system_extra = BRIEF_FORCE_REMINDER
+    elif force_strategy:
+        system_extra = STRATEGY_FORCE_REMINDER
+    else:
+        system_extra = None
 
     input_messages = messages if messages is not None else initial_messages(prompt)
 

@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { colors, glyphs, spacing } from "../theme.js";
+import type { ModeState } from "../mode.js";
 import type { SkillEntry } from "../types.js";
 
 interface Props {
   onSubmit: (value: string) => void;
   onAbort?: () => void;
   disabled?: boolean;
-  planMode?: boolean;
+  mode?: ModeState;
   skills?: SkillEntry[];
 }
 
@@ -23,20 +24,49 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+// Word boundary: skip whitespace then skip non-whitespace.
+function prevWordBoundary(s: string, i: number): number {
+  let j = i;
+  while (j > 0 && /\s/.test(s[j - 1]!)) j--;
+  while (j > 0 && !/\s/.test(s[j - 1]!)) j--;
+  return j;
+}
+function nextWordBoundary(s: string, i: number): number {
+  let j = i;
+  while (j < s.length && /\s/.test(s[j]!)) j++;
+  while (j < s.length && !/\s/.test(s[j]!)) j++;
+  return j;
+}
+
+// Raw escape sequences Ink doesn't decode into Key flags.
+const SEQ_HOME = new Set(["\x1b[H", "\x1b[1~", "\x1b[7~", "\x1bOH"]);
+const SEQ_END = new Set(["\x1b[F", "\x1b[4~", "\x1b[8~", "\x1bOF"]);
+const SEQ_CTRL_LEFT = new Set(["\x1b[1;5D", "\x1b[5D", "\x1bOd"]);
+const SEQ_CTRL_RIGHT = new Set(["\x1b[1;5C", "\x1b[5C", "\x1bOc"]);
+const SEQ_DELETE = new Set(["\x1b[3~"]);
+
 export function PromptInput({
   onSubmit,
   onAbort,
   disabled = false,
-  planMode = false,
+  mode = "normal",
   skills = [],
 }: Props) {
   const [value, setValue] = useState("");
+  const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
   const { stdout } = useStdout();
 
   // 부모가 turn을 시작(disabled=true)하면 stdin race와 무관하게 입력창을 강제로 비운다.
   useEffect(() => {
-    if (disabled) setValue("");
+    if (disabled) {
+      setValue("");
+      setCursor(0);
+    }
   }, [disabled]);
 
   const matches = useMemo(() => {
@@ -59,7 +89,9 @@ export function PromptInput({
   }, [matches.length, value]);
 
   const completeWith = (entry: SkillEntry) => {
-    setValue(`/${entry.name} `);
+    const next = `/${entry.name} `;
+    setValue(next);
+    setCursor(next.length);
   };
 
   useInput((input, key) => {
@@ -86,23 +118,75 @@ export function PromptInput({
       }
       if (key.escape) {
         setValue("");
+        setCursor(0);
         return;
       }
     }
+
+    // Raw escape sequences Ink doesn't decode (Home/End/Ctrl+Arrow/Delete).
+    if (input && input.startsWith("\x1b")) {
+      if (SEQ_HOME.has(input)) { setCursor(0); return; }
+      if (SEQ_END.has(input)) { setCursor(value.length); return; }
+      if (SEQ_CTRL_LEFT.has(input)) { setCursor((c) => prevWordBoundary(value, c)); return; }
+      if (SEQ_CTRL_RIGHT.has(input)) { setCursor((c) => nextWordBoundary(value, c)); return; }
+      if (SEQ_DELETE.has(input)) {
+        setValue((v) => {
+          const c = clamp(cursor, 0, v.length);
+          if (c >= v.length) return v;
+          return v.slice(0, c) + v.slice(c + 1);
+        });
+        return;
+      }
+      // Unknown ESC sequence — swallow so it doesn't get inserted as junk.
+      return;
+    }
+
+    if (key.leftArrow) {
+      if (key.ctrl || key.meta) setCursor((c) => prevWordBoundary(value, c));
+      else setCursor((c) => clamp(c - 1, 0, value.length));
+      return;
+    }
+    if (key.rightArrow) {
+      if (key.ctrl || key.meta) setCursor((c) => nextWordBoundary(value, c));
+      else setCursor((c) => clamp(c + 1, 0, value.length));
+      return;
+    }
+
+    if (key.ctrl && input === "a") { setCursor(0); return; }
+    if (key.ctrl && input === "e") { setCursor(value.length); return; }
+    if (key.meta && input === "b") { setCursor((c) => prevWordBoundary(value, c)); return; }
+    if (key.meta && input === "f") { setCursor((c) => nextWordBoundary(value, c)); return; }
+    if (key.ctrl && input === "w") {
+      const c = clamp(cursor, 0, value.length);
+      const start = prevWordBoundary(value, c);
+      setValue(value.slice(0, start) + value.slice(c));
+      setCursor(start);
+      return;
+    }
+
     if (key.return) {
       const trimmed = value.trim();
       if (trimmed) {
         setValue("");
+        setCursor(0);
         onSubmit(trimmed);
       }
       return;
     }
+    // Most terminals send 0x7f (DEL) for the Backspace key, which Ink reports
+    // as key.delete. The actual Forward Delete key sends ESC[3~ and is handled
+    // by SEQ_DELETE above. So treat both flags as backspace here.
     if (key.backspace || key.delete) {
-      setValue((v) => v.slice(0, -1));
+      const c = clamp(cursor, 0, value.length);
+      if (c === 0) return;
+      setValue(value.slice(0, c - 1) + value.slice(c));
+      setCursor(c - 1);
       return;
     }
     if (!key.ctrl && !key.meta && input) {
-      setValue((v) => v + input);
+      const c = clamp(cursor, 0, value.length);
+      setValue(value.slice(0, c) + input + value.slice(c));
+      setCursor(c + input.length);
     }
   });
 
@@ -141,15 +225,30 @@ export function PromptInput({
         marginTop={spacing.xs}
         paddingX={spacing.xs}
         borderStyle="round"
-        borderColor={planMode ? colors.planMode : colors.borderPrompt}
+        borderColor={mode === "strategy" ? colors.planMode : mode === "brief" ? colors.briefMode : colors.borderPrompt}
       >
         {disabled
           ? <Text bold dimColor>{glyphs.userPrefix} </Text>
           : <Text bold color={colors.userPrefix}>{glyphs.userPrefix} </Text>
         }
-        <Text>{value}</Text>
-        {!disabled && <Text inverse>{" "}</Text>}
-        {disabled && <Text dimColor>{glyphs.ellipsis}</Text>}
+        {disabled ? (
+          <>
+            <Text>{value}</Text>
+            <Text dimColor>{glyphs.ellipsis}</Text>
+          </>
+        ) : (() => {
+          const c = clamp(cursor, 0, value.length);
+          const before = value.slice(0, c);
+          const at = value.slice(c, c + 1) || " ";
+          const after = value.slice(c + 1);
+          return (
+            <>
+              <Text>{before}</Text>
+              <Text inverse>{at}</Text>
+              <Text>{after}</Text>
+            </>
+          );
+        })()}
       </Box>
     </Box>
   );

@@ -7,11 +7,11 @@
    - 1단계 wiki-output: `smart_search` 로 의미 검색(seeds).
    - 2단계 cache: `smart_search` 가 자동으로 registry를 결합합니다.
    - 3단계 1-hop KG: 같은 호출 결과의 `neighbors` 를 검토합니다(이웃 중 의미적으로 무관한 것은 응답에서 제외).
-   - 4단계 json: 위 단계가 부족하면 `drilldown=True` 로 json 경로를 받아 `read_with_anchor` 로 페이지 단위로 회수합니다.
+   - 4단계 json: 위 단계가 부족하면 `drilldown=True` 로 id 후보를 받아 `read_evidence(id, start_page=…)` 로 페이지 단위로 회수합니다.
    - 5단계 sources: json 에 없는 raw 텍스트만 마지막에 봅니다.
 3. 단계 간 결정 사유를 한 줄씩 남깁니다(예: "wiki에 진술 요약 있으나 정확 페이지 인용 필요 → json drill-down").
 
-   **특정 인물 진술·증언 질문인 경우**: 질문에 실명 또는 직함이 있으면 1단계(wiki) 결과에 관련 내용이 있더라도 반드시 4단계(json)까지 진행합니다. wiki 요약본은 발언 원문과 인물 실명을 생략하는 경우가 많으므로, `drilldown=True`로 source_ids를 확보한 뒤 `read_with_anchor`로 원본 페이지를 직접 읽어 인용하세요. "wiki에 언급 없음"은 진술이 없다는 뜻이 아닙니다.
+   **특정 인물 진술·증언 질문인 경우**: 질문에 실명 또는 직함이 있으면 1단계(wiki) 결과에 관련 내용이 있더라도 반드시 4단계(json)까지 진행합니다. wiki 요약본은 발언 원문과 인물 실명을 생략하는 경우가 많으므로, `drilldown=True` 로 id 를 확보한 뒤 `read_evidence` 로 원본 페이지를 직접 읽어 인용하세요. "wiki에 언급 없음"은 진술이 없다는 뜻이 아닙니다.
 4. 절대 `write_file` / `edit_file` 를 호출하지 않습니다. 메인이 쓸 일입니다.
 
 ## 출력 계약
@@ -21,10 +21,12 @@
 {
   "summary": "<3-7줄 요약>",
   "citations": [
-    {"path": "json/1.json", "anchor": "p2", "snippet": "...", "edge": "link|concept|entity|seed", "via": "<source-id 또는 null>"}
+    {"id": "1", "page": 2, "snippet": "...", "edge": "link|concept|entity|seed", "via": "<id 또는 null>"}
   ],
   "search_trace": ["wiki-embeddings: ...", "kg-expand: +N neighbors via ...", "drilldown: ..."]
 }
 ```
+
+본문/요약 안에 짧게 인용을 다는 경우 `@@[id]` 형식을 사용합니다. citation token 자체에는 page/line 을 넣지 않습니다.
 
 토큰 절약을 최우선으로 합니다. 메인 에이전트에게 가능한 한 짧은 인용 후보 묶음만 전달하세요.

@@ -39,9 +39,13 @@ export class PythonBridge {
     this.closeHandlers.push(handler);
   }
 
-  send(prompt: string, opts?: { forceStrategy?: boolean }): void {
+  send(
+    prompt: string,
+    opts?: { forceStrategy?: boolean; forceBrief?: boolean },
+  ): void {
     const payload: Record<string, unknown> = { prompt };
     if (opts?.forceStrategy) payload.force_strategy = true;
+    if (opts?.forceBrief) payload.force_brief = true;
     this.proc.stdin!.write(JSON.stringify(payload) + "\n");
   }
 

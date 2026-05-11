@@ -5,9 +5,11 @@ store overwrites prior contents. Lifetime is the lifetime of the
 :class:`TodoStore` instance, which is created once per CLI run inside
 :func:`case_agent.agent.build_case_agent_components`.
 
-The loop in :mod:`case_agent.loop.query` reads the store after a
-successful ``write_todos`` call and emits a ``TodosUpdated`` stream event
-so the TUI can render the checklist reactively.
+The loop in :mod:`case_agent.loop.query` snapshots the store before and
+after every tool call; whenever it changes (``write_todos`` itself, or any
+other tool that mutates the store such as Brief Mode's
+``approve_brief_outline`` / ``write_brief_section``) it emits a
+``TodosUpdated`` stream event so the TUI can render the checklist reactively.
 """
 
 from __future__ import annotations

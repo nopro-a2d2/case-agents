@@ -1,13 +1,11 @@
 """Human-readable Korean labels for tool-call streaming events.
 
 The streaming UI used to show the raw tool name and the first argument
-(e.g. ``read_with_anchor wiki-output/entities/entity-310.md``). For the
-lawyer-facing front-end we resolve those into "{action} - {subject}"
-labels backed by the workspace's evidence/registry data:
+(e.g. ``read_evidence id=cdoc_01KKH4TTAG…``). For the lawyer-facing front-end
+we resolve those into "{action} - {subject}" labels backed by the
+workspace's evidence/registry data:
 
-  * ``read_with_anchor``   → "문서 검토 - {number} : {name}" (sources)
-                              / "{name_ko} 엔티티 확인"      (entities)
-                              / "{name_ko} 개념 확인"        (concepts)
+  * ``read_evidence``      → "문서 검토 - {number} : {name}" (+ page suffix)
   * ``smart_search``       → "자료 검색 - {query}"
   * ``list_evidence``      → "증거 목록 - {filter desc}"
   * ``verify_citations``   → "인용 검증 - {path}"
@@ -20,15 +18,15 @@ write_file) return ``None`` so the front-end keeps its existing fallback.
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Callable
 
+from ..briefs import BRIEF_KINDS
 from ..workspace import Workspace
 
 
 # Tool name → Korean verb prefix.
 _ACTION_BY_TOOL: dict[str, str] = {
-    "read_with_anchor": "문서 검토",
+    "read_evidence": "문서 검토",
     "smart_search": "자료 검색",
     "list_evidence": "증거 목록",
     "verify_citations": "인용 검증",
@@ -37,48 +35,38 @@ _ACTION_BY_TOOL: dict[str, str] = {
 
 
 # `check_completeness` doctype keys → 한국어 라벨.
+# Brief-kind entries are derived from BRIEF_KINDS so adding a new kind only
+# touches the registry. Non-brief doctypes stay hardcoded.
 _KIND_LABEL: dict[str, str] = {
     "evidence_acknowledgment": "증거인부서",
     "witness_questions": "증인심문사항",
     "defendant_questions": "피고인심문사항",
-    "defense_opinion": "변호인 의견서",
-    "civil_brief": "민사 준비서면",
     "evidence_pros_cons": "증거 유불리표",
     "timeline": "연표",
     "issues": "쟁점표",
+    **{k.doc_kind: k.label_ko for k in BRIEF_KINDS.values()},
 }
 
 
-_CITATION_RE = re.compile(r"^([^\s#]+)(?:#([^\s]+))?$")
-_SOURCE_PATH_RE = re.compile(r"^wiki-output/sources/source-(.+)\.md$")
-_ENTITY_PATH_RE = re.compile(r"^wiki-output/entities/(entity-\d+)\.md$")
-_CONCEPT_PATH_RE = re.compile(r"^wiki-output/concepts/(concept-\d+)\.md$")
-_JSON_PATH_RE = re.compile(r"^json/(.+)\.json$")
+def _format_addressing(args: dict[str, Any]) -> str:
+    """Render read_evidence addressing args as a Korean subject suffix.
 
-_PAGE_ANCHOR_RE = re.compile(r"^p(\d+)(?:\.\.(\d+))?$")
-_LINE_ANCHOR_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
-_SECTION_ANCHOR_RE = re.compile(r"^sec:(.+)$")
-
-
-def _format_anchor(anchor: str | None) -> str:
-    """Render an anchor as a Korean-friendly subject suffix.
-
-    pN          → " (N쪽)"
-    pA..B       → " (A-B쪽)"
-    Lstart-Lend → " (L{start}-L{end})"
-    sec:slug    → " (§slug)"
+    start_page (+ end_page) → " (N쪽)" / " (A-B쪽)"
+    start_line (+ end_line) → " (L{start}-L{end})"
+    section_id              → " (§slug)"
     """
-    if not anchor:
-        return ""
-    if m := _PAGE_ANCHOR_RE.match(anchor):
-        a, b = m.group(1), m.group(2)
-        return f" ({a}-{b}쪽)" if b else f" ({a}쪽)"
-    if m := _LINE_ANCHOR_RE.match(anchor):
-        a, b = m.group(1), m.group(2)
-        return f" (L{a}-L{b})" if b else f" (L{a})"
-    if m := _SECTION_ANCHOR_RE.match(anchor):
-        return f" (§{m.group(1)})"
-    return f" (#{anchor})"
+    sp = args.get("start_page")
+    if sp is not None:
+        ep = args.get("end_page")
+        return f" ({sp}-{ep}쪽)" if ep and ep != sp else f" ({sp}쪽)"
+    sl = args.get("start_line")
+    if sl is not None:
+        el = args.get("end_line")
+        return f" (L{sl}-L{el})" if el and el != sl else f" (L{sl})"
+    sec = args.get("section_id")
+    if sec:
+        return f" (§{sec})"
+    return ""
 
 
 class _CaseLabelIndex:
@@ -167,21 +155,12 @@ class _CaseLabelIndex:
         return f"{meta.get('name_ko') or cid} 개념 확인"
 
 
-def _read_with_anchor_subject(idx: _CaseLabelIndex, citation: str) -> str:
-    m = _CITATION_RE.match(citation.strip())
-    if not m:
-        return citation
-    path = m.group(1)
-    suffix = _format_anchor(m.group(2))
-    if sm := _SOURCE_PATH_RE.match(path):
-        return (idx.source_label(sm.group(1)) or sm.group(1)) + suffix
-    if em := _ENTITY_PATH_RE.match(path):
-        return (idx.entity_label(em.group(1)) or em.group(1)) + suffix
-    if cm := _CONCEPT_PATH_RE.match(path):
-        return (idx.concept_label(cm.group(1)) or cm.group(1)) + suffix
-    if jm := _JSON_PATH_RE.match(path):
-        return (idx.source_label(jm.group(1)) or jm.group(1)) + suffix
-    return path + suffix
+def _read_evidence_subject(idx: _CaseLabelIndex, args: dict[str, Any]) -> str:
+    id_ = str(args.get("id") or "").strip()
+    suffix = _format_addressing(args)
+    if not id_:
+        return suffix.lstrip() or ""
+    return (idx.source_label(id_) or id_) + suffix
 
 
 def _list_evidence_subject(args: dict[str, Any]) -> str:
@@ -213,8 +192,8 @@ def build_label_fn(workspace: Workspace) -> DisplayLabelFn:
         if action is None:
             return None
         try:
-            if name == "read_with_anchor":
-                subject = _read_with_anchor_subject(idx, str(args.get("citation") or ""))
+            if name == "read_evidence":
+                subject = _read_evidence_subject(idx, args)
             elif name == "smart_search":
                 subject = str(args.get("query") or "").strip()
             elif name == "list_evidence":

@@ -1,5 +1,5 @@
 const TOOL_GROUPS: Array<{ label: string; items: string }> = [
-  { label: "Search ", items: "smart_search · read_with_anchor · list_evidence" },
+  { label: "Search ", items: "smart_search · read_evidence · list_evidence" },
   { label: "Verify ", items: "verify_citations · check_completeness" },
   { label: "Compute", items: "calculate" },
   { label: "Memory ", items: "read_memory_index · read_memory · write_memory" },
@@ -37,7 +37,7 @@ export function WelcomeScreen() {
       </div>
 
       <div className="mt-2">
-        <span className="opacity-60">Keys      Enter send  ·  Shift+Tab plan mode  ·  Esc abort</span>
+        <span className="opacity-60">Keys      Enter send  ·  Shift+Tab cycle (normal → strategy → brief)  ·  Esc abort</span>
       </div>
     </div>
   );

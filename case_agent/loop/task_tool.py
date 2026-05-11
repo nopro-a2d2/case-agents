@@ -147,4 +147,25 @@ def build_task_tool(
     return tool
 
 
-__all__ = ["StreamingTaskTool", "build_task_tool"]
+def build_task_tool_for_subagent(
+    *,
+    subagents: dict[str, dict[str, Any]],
+    allowed: set[str],
+    fallback_model: "BaseChatModel",
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> "BaseToolType":
+    """Variant of :func:`build_task_tool` restricted to a whitelist of names.
+
+    Used when injecting a ``task`` tool into another subagent so it can only
+    delegate to the sub-sub-agents we explicitly allow (typically just
+    ``"explore"``). This blocks infinite recursion and keeps the delegation
+    graph flat: planning/writing subagents may call explore, but cannot call
+    each other or themselves.
+    """
+    filtered = {k: v for k, v in subagents.items() if k in allowed}
+    return build_task_tool(
+        subagents=filtered, fallback_model=fallback_model, max_turns=max_turns
+    )
+
+
+__all__ = ["StreamingTaskTool", "build_task_tool", "build_task_tool_for_subagent"]

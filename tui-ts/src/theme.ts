@@ -15,7 +15,8 @@ export const colors = {
   error:        "rgb(255,168,180)",  // failed bullet, future diff-removed
   warning:      "rgb(150,108,30)",   // reserved
   permission:   "rgb(87,105,247)",   // reserved — future permission prompts
-  planMode:     "rgb(0,102,102)",    // reserved — future plan mode
+  planMode:     "rgb(0,102,102)",    // strategy mode indicator (Shift+Tab cycle)
+  briefMode:    "rgb(150,90,30)",    // brief mode indicator (Shift+Tab cycle, amber)
   userBubbleBg: "rgb(235,235,235)",  // soft light-gray bar behind UserBubble (truecolor; not ANSI "gray", which maps to a dark palette index on most terminals)
   suggestion:   "cyan",              // slash picker active row — mirrors claude-code "suggestion" theme key
 } as const;

@@ -325,6 +325,109 @@ def test_write_todos_emits_todos_updated_event_after_tool_end():
     assert store.snapshot() == todos_payload
 
 
+def test_brief_tool_mutating_todos_emits_todos_updated_event(tmp_path):
+    """Brief Mode tools (approve_brief_outline / write_brief_section) mutate
+    the shared TodoStore directly. The loop must detect the change via
+    before/after snapshot diff and emit TodosUpdated — same as write_todos."""
+    from case_agent.loop import brief_mode
+    from case_agent.tools.brief import (
+        build_approve_brief_outline_tool,
+        build_write_brief_section_tool,
+    )
+    from case_agent.workspace import LocalFS
+
+    (tmp_path / "emit_test").mkdir()
+    ws = LocalFS(case_id="emit_test", root=str(tmp_path))
+    brief_mode.enter_brief_mode(ws, "civil_brief")
+    brief_mode.propose_outline(
+        ws,
+        [
+            {"id": "1", "title": "청구취지", "summary": "x"},
+            {"id": "2", "title": "주장", "summary": "y"},
+        ],
+    )
+
+    store = TodoStore()
+    approve_tool = build_approve_brief_outline_tool(ws, store)
+    write_section_tool = build_write_brief_section_tool(ws, store)
+
+    model = _StubModel([
+        [_tool_chunk(tc_id="t1", name="approve_brief_outline", args={})],
+        [_tool_chunk(
+            tc_id="t2",
+            name="write_brief_section",
+            args={"section_id": "1", "content": "본문 (json/1.json#p1)"},
+        )],
+        [_text_chunk("done")],
+    ])
+
+    async def _run():
+        from langchain_core.messages import HumanMessage
+
+        events = []
+        async for ev in query(
+            messages=[HumanMessage(content="hi")],
+            system_prompt="sys",
+            tools=[approve_tool, write_section_tool],
+            model=model,
+            todos_store=store,
+        ):
+            events.append(ev)
+        return events
+
+    events = asyncio.run(_run())
+
+    # Two ToolEnds → each followed by a TodosUpdated.
+    end_indices = [i for i, e in enumerate(events) if isinstance(e, ToolEnd)]
+    assert len(end_indices) == 2
+
+    first_update = events[end_indices[0] + 1]
+    assert isinstance(first_update, TodosUpdated)
+    statuses = [t["status"] for t in first_update.todos]
+    assert statuses == ["in_progress", "pending"], (
+        f"approve must publish section todos, got {statuses}"
+    )
+
+    second_update = events[end_indices[1] + 1]
+    assert isinstance(second_update, TodosUpdated)
+    statuses = [t["status"] for t in second_update.todos]
+    assert statuses == ["completed", "in_progress"], (
+        f"write_brief_section must advance todos, got {statuses}"
+    )
+
+
+def test_no_todos_updated_when_tool_does_not_mutate_store():
+    """A regular tool call (no todo mutation) must not emit TodosUpdated even
+    when todos_store is wired in."""
+    store = TodoStore()
+
+    async def search(q: str) -> str:  # noqa: ARG001
+        return "result"
+
+    tool = _make_tool("smart_search", search)
+    model = _StubModel([
+        [_tool_chunk(tc_id="t1", name="smart_search", args={"q": "x"})],
+        [_text_chunk("done")],
+    ])
+
+    async def _run():
+        from langchain_core.messages import HumanMessage
+
+        events = []
+        async for ev in query(
+            messages=[HumanMessage(content="hi")],
+            system_prompt="sys",
+            tools=[tool],
+            model=model,
+            todos_store=store,
+        ):
+            events.append(ev)
+        return events
+
+    events = asyncio.run(_run())
+    assert not any(isinstance(e, TodosUpdated) for e in events)
+
+
 def test_no_todos_updated_event_when_store_omitted():
     """Without a todos_store wired in, the loop must not emit TodosUpdated
     even when write_todos runs."""

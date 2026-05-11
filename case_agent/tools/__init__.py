@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .agent_tools import build_case_tools
+from .brief import build_brief_mode_tools
 from .memory import build_memory_tools
 from .skill import build_skill_tool
 from .strategy import build_strategy_tools
@@ -44,6 +45,7 @@ def build_all_tools(
     tools.extend(build_case_tools(workspace, embedder))
     tools.extend(build_memory_tools(workspace))
     tools.extend(build_strategy_tools(workspace))
+    tools.extend(build_brief_mode_tools(workspace, todos_store))
     tools.append(build_write_todos_tool(todos_store))
     if skills_registry:
         tools.append(build_skill_tool(skills_registry))

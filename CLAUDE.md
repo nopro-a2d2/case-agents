@@ -63,3 +63,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Project quick reference
+
+- `uv run python …` / `uv run pytest …` — `python` / `pytest` 가 PATH 에 없음. `ruff check` 는 직접 호출.
+- Brief subsystem tests: `uv run pytest tests/test_brief_*.py -q` (67 tests).
+- Agent 전 표면의 인용 그래머는 `@@[id]` 한 형식 (id 는 증거 json 의 top-level `id` 필드). 페이지·라인·섹션은 citation 에 넣지 말고 `read_evidence(id, start_page=…)` 파라미터 또는 본문 산문으로 전달.
+- Brief 종류별 구조 규칙(헤딩 키워드·최소 인용 수)의 단일 진실은 `case_agent/tools/verify.py`.

@@ -1,14 +1,15 @@
-"""Tests for read_with_anchor (line/page/section) and list_evidence."""
+"""Tests for parse_citation, build_id_registry, read_evidence, list_evidence."""
 
 from __future__ import annotations
 
 import pytest
 
 from case_agent.tools.citation import (
-    Citation,
+    build_id_registry,
     list_evidence,
     parse_citation,
-    read_with_anchor,
+    read_evidence,
+    resolve_id,
 )
 from case_agent.workspace import LocalFS
 
@@ -20,72 +21,101 @@ def _ws() -> LocalFS:
     return LocalFS(case_id=CASE_ID, root="data")
 
 
+# ---- parse_citation -------------------------------------------------------
+
+
 def test_parse_citation_basic() -> None:
-    c = parse_citation("json/1.json#p2")
-    assert c.path == "json/1.json"
-    assert c.anchor == "p2"
-    assert str(c) == "json/1.json#p2"
+    c = parse_citation("@@[1]")
+    assert c.id == "1"
+    assert str(c) == "@@[1]"
 
 
-def test_read_with_anchor_page() -> None:
-    ws = _ws()
-    r = read_with_anchor(ws, "json/1.json#p1")
-    assert r.kind == "page"
-    assert "고발장" in r.snippet
-    assert r.citation == "json/1.json#p1"
+def test_parse_citation_ulid_like() -> None:
+    c = parse_citation("@@[cdoc_01KKH4TTAG000000000000000S]")
+    assert c.id == "cdoc_01KKH4TTAG000000000000000S"
 
 
-def test_read_with_anchor_lines() -> None:
-    ws = _ws()
-    r = read_with_anchor(ws, "wiki-output/overview.md#L1-L5")
-    assert r.kind == "lines"
-    assert r.snippet
-    # at most 5 lines
-    assert r.snippet.count("\n") <= 4
-
-
-def test_read_with_anchor_section() -> None:
-    ws = _ws()
-    r = read_with_anchor(ws, "wiki-output/sources/source-1.md#sec:요약")
-    assert r.kind == "section"
-    assert "고발" in r.snippet
-
-
-def test_read_with_anchor_bad_anchor_raises() -> None:
-    ws = _ws()
+def test_parse_citation_rejects_old_grammar() -> None:
     with pytest.raises(ValueError):
-        read_with_anchor(ws, "json/1.json#p99999")
+        parse_citation("json/1.json#p2")
 
 
-def test_read_with_anchor_page_range() -> None:
+def test_parse_citation_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        parse_citation("@@[]")
+
+
+# ---- registry -------------------------------------------------------------
+
+
+def test_build_id_registry_smoke() -> None:
     ws = _ws()
-    r = read_with_anchor(ws, "json/1.json#p1..2")
+    reg = build_id_registry(ws)
+    assert reg
+    assert all(p.startswith("json/") for p in reg.values())
+    # spark fixture: id "1" should resolve to json/1.json
+    assert reg.get("1") == "json/1.json"
+
+
+def test_build_id_registry_is_cached() -> None:
+    ws = _ws()
+    a = build_id_registry(ws)
+    b = build_id_registry(ws)
+    assert a is b  # same dict instance returned from cache
+
+
+def test_resolve_id_unknown() -> None:
+    ws = _ws()
+    with pytest.raises(KeyError):
+        resolve_id(ws, "no-such-doc-id")
+
+
+# ---- read_evidence --------------------------------------------------------
+
+
+def test_read_evidence_page() -> None:
+    ws = _ws()
+    r = read_evidence(ws, "1", start_page=1)
+    assert r.kind == "page"
+    assert r.id == "1"
+    assert r.citation == "@@[1]"
+    assert "고발장" in r.snippet
+
+
+def test_read_evidence_page_range() -> None:
+    ws = _ws()
+    r = read_evidence(ws, "1", start_page=1, end_page=2)
     assert r.kind == "page"
     assert "--- p1 ---" in r.snippet
     assert "--- p2 ---" in r.snippet
-    assert r.citation == "json/1.json#p1..2"
 
 
-def test_read_with_anchor_page_range_single_normalized() -> None:
+def test_read_evidence_full() -> None:
     ws = _ws()
-    r = read_with_anchor(ws, "json/1.json#p1..1")
-    assert r.kind == "page"
-    # canonical citation collapses pA..A → pA
-    assert r.citation == "json/1.json#p1"
+    r = read_evidence(ws, "1")
+    assert r.kind == "full"
+    assert r.snippet
 
 
-def test_read_with_anchor_legacy_dash_range_rejected() -> None:
-    """`p1-5` is not the supported grammar — must raise with a hint."""
+def test_read_evidence_unknown_id_raises() -> None:
     ws = _ws()
-    with pytest.raises(ValueError) as excinfo:
-        read_with_anchor(ws, "json/1.json#p1-5")
-    assert "pA..B" in str(excinfo.value)
+    with pytest.raises(KeyError):
+        read_evidence(ws, "no-such-id")
 
 
-def test_read_with_anchor_page_range_not_found() -> None:
+def test_read_evidence_page_not_found() -> None:
     ws = _ws()
     with pytest.raises(ValueError):
-        read_with_anchor(ws, "json/1.json#p9000..9001")
+        read_evidence(ws, "1", start_page=99999)
+
+
+def test_read_evidence_rejects_multiple_addressing_modes() -> None:
+    ws = _ws()
+    with pytest.raises(ValueError):
+        read_evidence(ws, "1", start_page=1, start_line=1)
+
+
+# ---- list_evidence --------------------------------------------------------
 
 
 def test_list_evidence_smoke() -> None:
@@ -93,7 +123,7 @@ def test_list_evidence_smoke() -> None:
     items = list_evidence(ws, limit=5)
     assert items
     assert all(it.json_path.startswith("json/") for it in items)
-    assert all(it.source_id for it in items)
+    assert all(it.id for it in items)
 
 
 def test_list_evidence_filter_by_name() -> None:

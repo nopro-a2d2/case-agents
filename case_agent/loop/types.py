@@ -98,9 +98,8 @@ class SubagentToolEnd:
 
 @dataclass(frozen=True)
 class TodosUpdated:
-    """The session todo list changed — emitted after a successful
-    ``write_todos`` tool call. ``todos`` is a snapshot (list of dicts
-    with ``content`` and ``status`` keys).
+    """Emitted when a tool call mutates the shared ``TodoStore``. ``todos`` is
+    a snapshot (list of dicts with ``content`` and ``status`` keys).
     """
 
     todos: tuple[dict[str, Any], ...]
