@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
     from ..agent import CaseAgentComponents
+    from ..guardrails import GuardrailManager
 
 
 def _build_langfuse_metadata(
@@ -54,6 +55,7 @@ async def stream_query(
     session_id: str | None = None,
     user_id: str | None = None,
     tags: "list[str] | None" = None,
+    guardrails: "GuardrailManager | None" = None,
 ) -> AsyncIterator[StreamEvent]:
     """Yield raw :class:`StreamEvent`s as the loop runs.
 
@@ -84,6 +86,7 @@ async def stream_query(
 
     metadata = _build_langfuse_metadata(session_id, user_id, tags)
     display_label_fn = build_label_fn(components.workspace)
+    effective_guardrails = guardrails or getattr(components, "guardrails", None)
 
     async for ev in query(
         messages=input_messages,
@@ -98,6 +101,7 @@ async def stream_query(
         metadata=metadata,
         system_extra=system_extra,
         display_label_fn=display_label_fn,
+        guardrails=effective_guardrails,
     ):
         yield ev
 

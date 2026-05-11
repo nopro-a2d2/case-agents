@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
 
+    from .guardrails import GuardrailManager
     from .tools.search import Embedder
     from .workspace import Workspace
 
@@ -50,6 +51,7 @@ class CaseAgentComponents:
     todos_store: TodoStore
     skills: dict[str, Skill] = field(default_factory=dict)
     commands: dict[str, tuple[Command, CommandHandler]] = field(default_factory=dict)
+    guardrails: "GuardrailManager | None" = None
 
 
 def build_case_agent_components(
@@ -58,6 +60,8 @@ def build_case_agent_components(
     heavy_model: "BaseChatModel | None" = None,
     light_model: "BaseChatModel | None" = None,
     embedder: "Embedder | None" = None,
+    enable_guardrails: bool = True,
+    guardrails: "GuardrailManager | None" = None,
 ) -> CaseAgentComponents:
     """Assemble the parts our hand-rolled loop needs.
 
@@ -108,6 +112,12 @@ def build_case_agent_components(
 
     commands = discover_commands()
 
+    effective_guardrails = guardrails
+    if effective_guardrails is None and enable_guardrails:
+        from .guardrails import build_default_guardrails
+
+        effective_guardrails = build_default_guardrails()
+
     return CaseAgentComponents(
         workspace=workspace,
         model=main,
@@ -117,6 +127,7 @@ def build_case_agent_components(
         todos_store=todos_store,
         skills=skills,
         commands=commands,
+        guardrails=effective_guardrails,
     )
 
 
