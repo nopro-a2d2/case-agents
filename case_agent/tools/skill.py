@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from langchain_core.tools import tool
 
 if TYPE_CHECKING:
-    from ..skills import Skill
+    from case_agent.skills import Skill
 
 
 def build_skill_tool(registry: "dict[str, Skill]"):

@@ -12,11 +12,9 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from ..loop.strategy_mode import (
-    enter_strategy_mode as _enter,
-    exit_strategy_mode as _exit,
-)
-from ..workspace import Workspace
+from case_agent.loop.strategy_mode import enter_strategy_mode as _enter
+from case_agent.loop.strategy_mode import exit_strategy_mode as _exit
+from case_agent.workspace import Workspace
 
 
 def build_enter_strategy_mode_tool(workspace: Workspace):

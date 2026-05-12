@@ -24,12 +24,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from ..commands import CommandContext, try_dispatch
-from ..observability import flush as _obs_flush
-from .headless import _serialize
-from .runner import stream_query
-from .slash import build_skills_list_event, expand_slash
-from .types import Done
+from case_agent.commands import CommandContext, try_dispatch
+from case_agent.loop.headless import _serialize
+from case_agent.loop.runner import stream_query
+from case_agent.loop.slash import build_skills_list_event, expand_slash
+from case_agent.loop.types import Done
+from case_agent.observability import flush as _obs_flush
 
 logger = logging.getLogger("case_agent.ws")
 
@@ -54,8 +54,8 @@ def create_app(case: str, root: str, static_dir: Path | None = None) -> FastAPI:
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
 
-        from ..agent import build_case_agent_components
-        from ..workspace import LocalFS
+        from case_agent.agent import build_case_agent_components
+        from case_agent.workspace import LocalFS
 
         workspace = LocalFS(case_id=case, root=root)
         components = build_case_agent_components(workspace)

@@ -19,8 +19,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from ..auth import get_credentials
-
+from case_agent.auth import get_credentials
 
 DEFAULT_HEAVY_MODEL = os.environ.get("CASE_AGENT_HEAVY_MODEL", "claude-sonnet-4-6")
 DEFAULT_LIGHT_MODEL = os.environ.get("CASE_AGENT_LIGHT_MODEL", "gemini-3-flash-preview")

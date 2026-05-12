@@ -21,9 +21,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Literal
 
-from ..workspace import Workspace
-from .citation import build_id_registry
-
+from case_agent.tools.citation import build_id_registry
+from case_agent.workspace import Workspace
 
 # Inline citation token matching `@@[id]`.
 INLINE_CITE_RE = re.compile(r"@@\[([^\]\s]+)\]")

@@ -37,7 +37,7 @@ try:
 except ImportError:  # pragma: no cover — minimal test env
     _ChatAnthropicVertex = None  # type: ignore[assignment]
 
-from .types import (
+from case_agent.loop.types import (
     Done,
     StreamEvent,
     SubagentTextDelta,
@@ -57,10 +57,16 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
 
-    from ..tools.todos import TodoStore
+    from case_agent.guardrails import GuardrailManager
+    from case_agent.tools.todos import TodoStore
 
 
 DEFAULT_MAX_TURNS = 25
+
+_GUARDRAIL_REFUSAL = (
+    "저는 AiLex AI 입니다. 해당 요청은 답변드릴 수 없습니다. "
+    "사건 분석·QA·서면 작성과 관련된 질문을 도와드릴게요."
+)
 
 
 def _build_system_message(
@@ -113,6 +119,7 @@ async def query(
     metadata: dict | None = None,
     system_extra: str | None = None,
     display_label_fn: Callable[[str, dict], "dict | None"] | None = None,
+    guardrails: "GuardrailManager | None" = None,
 ) -> AsyncIterator[StreamEvent]:
     """Run the LLM↔Tool loop until end_turn, max_turns, or abort.
 
@@ -149,6 +156,28 @@ async def query(
         if metadata:
             run_config["metadata"] = metadata
     stream_kwargs = {"config": run_config} if run_config else {}
+
+    # Before-agent guardrails — run once on the entry prompt.
+    if guardrails is not None:
+        from case_agent.guardrails import Verdict as _Verdict
+
+        decision = await guardrails.before_agent(messages, system_prompt)
+        if decision.verdict is _Verdict.BLOCK:
+            text = decision.replacement or _GUARDRAIL_REFUSAL
+            # TurnStart MUST precede TextDelta — the web/TUI client only
+            # creates its assistant bubble on turn_start(turn=1), so dropping
+            # this event would make the refusal invisible.
+            yield TurnStart(1)
+            yield TextDelta(text)
+            blocked = AIMessage(content=text)
+            yield Done(
+                Terminal(
+                    "completed",
+                    final_text=text,
+                    messages=tuple([*messages, blocked]),
+                )
+            )
+            return
 
     for turn in range(1, max_turns + 1):
         if abort is not None and abort.is_set():
@@ -205,7 +234,19 @@ async def query(
 
         # 2. stop_reason branch.
         if not assistant_msg.tool_calls:
-            yield Done(Terminal("completed", final_text=coerce_text(assistant_msg.content), messages=tuple(state[1:])))
+            final_text = coerce_text(assistant_msg.content)
+            if guardrails is not None:
+                from case_agent.guardrails import Verdict as _Verdict
+
+                decision = await guardrails.after_agent(state[1:], final_text)
+                if decision.verdict is _Verdict.BLOCK:
+                    replacement = decision.replacement or _GUARDRAIL_REFUSAL
+                    yield TextDelta("\n\n" + replacement)
+                    final_text = replacement
+                    # Replace the assistant turn so downstream history reflects
+                    # the sanitised response.
+                    state[-1] = AIMessage(content=replacement)
+            yield Done(Terminal("completed", final_text=final_text, messages=tuple(state[1:])))
             return
 
         # 3. Execute each tool_use → append ToolMessage(s).

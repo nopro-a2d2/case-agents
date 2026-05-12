@@ -17,10 +17,11 @@ from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
 
-from .tools.citation import list_evidence as _list_evidence, read_evidence as _read_evidence
-from .tools.search import smart_search
-from .tools.verify import check_completeness, verify_citations
-from .workspace import LocalFS
+from case_agent.tools.citation import list_evidence as _list_evidence
+from case_agent.tools.citation import read_evidence as _read_evidence
+from case_agent.tools.search import smart_search
+from case_agent.tools.verify import check_completeness, verify_citations
+from case_agent.workspace import LocalFS
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Case-Agent CLI")
 console = Console()
@@ -46,8 +47,8 @@ def run(
     """Run a one-shot query against the DeepAgent."""
     import asyncio
 
-    from .agent import build_case_agent_components
-    from .loop import run_query_oneshot
+    from case_agent.agent import build_case_agent_components
+    from case_agent.loop import run_query_oneshot
 
     ws = _ws(case, root)
     console.print(Panel(f"case={ws.case_id}  root={ws.case_root}", title="case-agent"))
@@ -68,7 +69,7 @@ def search(
     drilldown: Annotated[bool, typer.Option("--drilldown/--no-drilldown")] = True,
 ) -> None:
     """Run smart_search alone (requires GCP for the embedder)."""
-    from .model import build_embedder
+    from case_agent.model import build_embedder
 
     ws = _ws(case, root)
     res = smart_search(

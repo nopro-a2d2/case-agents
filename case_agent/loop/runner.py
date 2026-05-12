@@ -10,16 +10,17 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from .brief_mode import BRIEF_FORCE_REMINDER
-from .labels import build_label_fn
-from .query import DEFAULT_MAX_TURNS, initial_messages, query
-from .strategy_mode import STRATEGY_FORCE_REMINDER
-from .types import Done, StreamEvent
+from case_agent.loop.brief_mode import BRIEF_FORCE_REMINDER
+from case_agent.loop.labels import build_label_fn
+from case_agent.loop.query import DEFAULT_MAX_TURNS, initial_messages, query
+from case_agent.loop.strategy_mode import STRATEGY_FORCE_REMINDER
+from case_agent.loop.types import Done, StreamEvent
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
-    from ..agent import CaseAgentComponents
+    from case_agent.agent import CaseAgentComponents
+    from case_agent.guardrails import GuardrailManager
 
 
 def _build_langfuse_metadata(
@@ -54,6 +55,7 @@ async def stream_query(
     session_id: str | None = None,
     user_id: str | None = None,
     tags: "list[str] | None" = None,
+    guardrails: "GuardrailManager | None" = None,
 ) -> AsyncIterator[StreamEvent]:
     """Yield raw :class:`StreamEvent`s as the loop runs.
 
@@ -75,31 +77,34 @@ async def stream_query(
 
     input_messages = messages if messages is not None else initial_messages(prompt)
 
+    from case_agent.observability import build_callbacks, langsmith_project_context
+
     # Auto-attach Langfuse callbacks unless caller passed an explicit list
     # (including an empty list to opt out).
     if callbacks is None:
-        from ..observability import build_callbacks
-
         callbacks = build_callbacks()
 
     metadata = _build_langfuse_metadata(session_id, user_id, tags)
     display_label_fn = build_label_fn(components.workspace)
+    effective_guardrails = guardrails or getattr(components, "guardrails", None)
 
-    async for ev in query(
-        messages=input_messages,
-        system_prompt=system_prompt,
-        tools=components.tools,
-        model=components.model,
-        max_turns=max_turns,
-        abort=abort,
-        stream_timeout=stream_timeout,
-        todos_store=getattr(components, "todos_store", None),
-        callbacks=callbacks,
-        metadata=metadata,
-        system_extra=system_extra,
-        display_label_fn=display_label_fn,
-    ):
-        yield ev
+    with langsmith_project_context(session_id):
+        async for ev in query(
+            messages=input_messages,
+            system_prompt=system_prompt,
+            tools=components.tools,
+            model=components.model,
+            max_turns=max_turns,
+            abort=abort,
+            stream_timeout=stream_timeout,
+            todos_store=getattr(components, "todos_store", None),
+            callbacks=callbacks,
+            metadata=metadata,
+            system_extra=system_extra,
+            display_label_fn=display_label_fn,
+            guardrails=effective_guardrails,
+        ):
+            yield ev
 
 
 async def run_query_oneshot(
@@ -117,7 +122,7 @@ async def run_query_oneshot(
     or ``error`` without producing text — callers (CLI) should render that
     as "(empty reply)" rather than raising.
     """
-    from ..observability import flush as _obs_flush
+    from case_agent.observability import flush as _obs_flush
 
     final_text: str | None = None
     try:

@@ -19,7 +19,6 @@ from typing import Any, Type
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
-
 _ALLOWED_BUILTINS: dict[str, Any] = {
     "abs": abs,
     "round": round,

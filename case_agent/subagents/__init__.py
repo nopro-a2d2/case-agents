@@ -14,13 +14,13 @@ import importlib
 import pkgutil
 from typing import TYPE_CHECKING, Any
 
-from .explore import build_explore_subagent
+from case_agent.subagents.explore import build_explore_subagent
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from ..tools.search import Embedder
-    from ..workspace import Workspace
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 def discover_subagents(

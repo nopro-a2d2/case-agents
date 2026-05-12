@@ -70,3 +70,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Brief subsystem tests: `uv run pytest tests/test_brief_*.py -q` (67 tests).
 - Agent 전 표면의 인용 그래머는 `@@[id]` 한 형식 (id 는 증거 json 의 top-level `id` 필드). 페이지·라인·섹션은 citation 에 넣지 말고 `read_evidence(id, start_page=…)` 파라미터 또는 본문 산문으로 전달.
 - Brief 종류별 구조 규칙(헤딩 키워드·최소 인용 수)의 단일 진실은 `case_agent/tools/verify.py`.
+- `case_agent` 패키지는 **절대 임포트만** 사용 (`from case_agent.X import Y`). `ruff TID252` 로 강제됨. 일괄 변환은 `uv run ruff check --select TID252 --fix --unsafe-fixes case_agent/`.

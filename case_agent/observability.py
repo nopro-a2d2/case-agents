@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from ._env import load_env
+from case_agent._env import load_env
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -39,14 +41,19 @@ _client_initialized = False
 _handler_initialized = False
 
 
-def _enabled() -> bool:
+def _env_flag(name: str, default: str = "false") -> bool:
+    """Parse a truthy env var. Single source of truth for boolean env reads."""
     load_env()
-    return os.environ.get("LANGFUSE_ENABLED", "false").strip().lower() in {
+    return os.environ.get(name, default).strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
     }
+
+
+def _enabled() -> bool:
+    return _env_flag("LANGFUSE_ENABLED")
 
 
 def _host() -> str:
@@ -138,6 +145,30 @@ def flush() -> None:
         logger.debug("Langfuse flush failed", exc_info=True)
 
 
+def _langsmith_enabled() -> bool:
+    return _env_flag("LANGSMITH_TRACING")
+
+
+@contextmanager
+def langsmith_project_context(session_id: str | None) -> Iterator[None]:
+    """Route LangSmith spans to a project named after ``session_id``.
+
+    Uses ``contextvars`` (via ``langsmith.tracing_context``) rather than
+    ``os.environ`` so concurrent WS connections don't clobber each other.
+    """
+    if not session_id or not _langsmith_enabled():
+        yield
+        return
+    try:
+        from langsmith import tracing_context
+    except ImportError:
+        logger.warning("langsmith not installed — project override skipped")
+        yield
+        return
+    with tracing_context(project_name=session_id):
+        yield
+
+
 def reset_for_test() -> None:
     """Clear singletons. Tests use this between fixtures with mutated env."""
     global _client, _handler, _client_initialized, _handler_initialized
@@ -152,5 +183,6 @@ __all__ = [
     "flush",
     "get_langchain_callback",
     "get_langfuse",
+    "langsmith_project_context",
     "reset_for_test",
 ]

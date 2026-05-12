@@ -3,7 +3,7 @@
 See :mod:`case_agent.memory.memdir` for the public API.
 """
 
-from .memdir import (
+from case_agent.memory.memdir import (
     MEMORY_DIR,
     MEMORY_INDEX,
     MEMORY_INDEX_MAX_BYTES,

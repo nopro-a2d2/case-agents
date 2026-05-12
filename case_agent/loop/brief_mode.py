@@ -24,9 +24,9 @@ import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Literal
 
-from ..briefs import BRIEF_KINDS, briefs_output_path, find_kind
-from ..workspace import Workspace
-from . import strategy_mode
+from case_agent.briefs import BRIEF_KINDS, briefs_output_path, find_kind
+from case_agent.loop import strategy_mode
+from case_agent.workspace import Workspace
 
 STATE_FILE = "state/brief.json"
 BRIEFS_DIR = "briefs"

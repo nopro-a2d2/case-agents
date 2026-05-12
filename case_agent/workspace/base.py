@@ -16,7 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
-
 READONLY_PREFIXES: tuple[str, ...] = (
     "wiki-output",
     "cache",

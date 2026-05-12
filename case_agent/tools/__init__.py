@@ -15,19 +15,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .agent_tools import build_case_tools
-from .brief import build_brief_mode_tools
-from .memory import build_memory_tools
-from .skill import build_skill_tool
-from .strategy import build_strategy_tools
-from .todos import TodoStore, build_write_todos_tool
+from case_agent.tools.agent_tools import build_case_tools
+from case_agent.tools.brief import build_brief_mode_tools
+from case_agent.tools.memory import build_memory_tools
+from case_agent.tools.skill import build_skill_tool
+from case_agent.tools.strategy import build_strategy_tools
+from case_agent.tools.todos import TodoStore, build_write_todos_tool
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from ..skills import Skill
-    from ..workspace import Workspace
-    from .search import Embedder
+    from case_agent.skills import Skill
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 def build_all_tools(

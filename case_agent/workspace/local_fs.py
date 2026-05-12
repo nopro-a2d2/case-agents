@@ -11,10 +11,10 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from .base import (
+from case_agent.workspace.base import (
+    READONLY_PREFIXES,
     Match,
     OutOfWorkspaceError,
-    READONLY_PREFIXES,
     ReadOnlyError,
     Workspace,
     WorkspaceError,

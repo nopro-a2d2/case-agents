@@ -27,8 +27,7 @@ from typing import Callable, Iterable, Protocol
 
 import numpy as np
 
-from ..workspace import Workspace
-
+from case_agent.workspace import Workspace
 
 # ---------------------------------------------------------------------------
 # Types

@@ -13,13 +13,14 @@ from case_agent import observability
 @pytest.fixture(autouse=True)
 def _reset_obs(monkeypatch):
     observability.reset_for_test()
-    # Strip Langfuse env vars by default; individual tests opt in.
+    # Strip Langfuse + LangSmith env vars by default; individual tests opt in.
     for k in (
         "LANGFUSE_ENABLED",
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_HOST",
         "LANGFUSE_BASE_URL",
+        "LANGSMITH_TRACING",
     ):
         monkeypatch.delenv(k, raising=False)
     yield
@@ -116,6 +117,54 @@ def test_legacy_base_url_falls_back(monkeypatch):
 
     observability.get_langfuse()
     assert seen_host == ["https://legacy.test"]
+
+
+def _install_langsmith_stub(monkeypatch) -> list[dict]:
+    """Stub the ``langsmith`` module's ``tracing_context`` with a recorder.
+
+    Returns the list that captures kwargs of each entered context.
+    """
+    from contextlib import contextmanager
+
+    calls: list[dict] = []
+
+    @contextmanager
+    def _stub_tracing_context(**kwargs):
+        calls.append(kwargs)
+        yield
+
+    stub = types.ModuleType("langsmith")
+    stub.tracing_context = _stub_tracing_context  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langsmith", stub)
+    return calls
+
+
+def test_langsmith_disabled_is_noop(monkeypatch):
+    """LANGSMITH_TRACING unset → context manager never touches langsmith."""
+    calls = _install_langsmith_stub(monkeypatch)
+    with observability.langsmith_project_context("s-1"):
+        pass
+    assert calls == []
+
+
+def test_langsmith_no_session_id_is_noop(monkeypatch):
+    """Even when enabled, a missing session_id skips the override."""
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    calls = _install_langsmith_stub(monkeypatch)
+    with observability.langsmith_project_context(None):
+        pass
+    with observability.langsmith_project_context(""):
+        pass
+    assert calls == []
+
+
+def test_langsmith_enabled_routes_to_session_project(monkeypatch):
+    """LANGSMITH_TRACING=true + session_id → tracing_context(project_name=session_id)."""
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    calls = _install_langsmith_stub(monkeypatch)
+    with observability.langsmith_project_context("ws-abc123"):
+        pass
+    assert calls == [{"project_name": "ws-abc123"}]
 
 
 def test_init_failure_degrades_to_none(monkeypatch):

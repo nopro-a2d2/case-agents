@@ -20,7 +20,6 @@ from typing import Literal, TypedDict
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-
 TodoStatus = Literal["pending", "in_progress", "completed"]
 
 

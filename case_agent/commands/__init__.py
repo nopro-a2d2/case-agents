@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Awaitable, Callable, Iterable
 
 if TYPE_CHECKING:
-    from ..loop.types import StreamEvent
+    from case_agent.loop.types import StreamEvent
 
 
 @dataclass(frozen=True)

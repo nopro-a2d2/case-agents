@@ -178,6 +178,7 @@ dev = [
 ]
 obs = [
     { name = "langfuse" },
+    { name = "langsmith" },
 ]
 s3 = [
     { name = "boto3" },
@@ -188,6 +189,7 @@ web = [
 ]
 wiki = [
     { name = "langfuse" },
+    { name = "langsmith" },
 ]
 
 [package.dev-dependencies]
@@ -208,6 +210,8 @@ requires-dist = [
     { name = "langfuse", marker = "extra == 'wiki'", specifier = ">=4.0.1" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0" },
+    { name = "langsmith", marker = "extra == 'obs'", specifier = ">=0.8.0" },
+    { name = "langsmith", marker = "extra == 'wiki'", specifier = ">=0.8.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },

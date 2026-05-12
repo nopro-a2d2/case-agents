@@ -24,7 +24,6 @@ from pathlib import Path
 
 from google.oauth2 import service_account
 
-
 VERTEX_SCOPES = ("https://www.googleapis.com/auth/cloud-platform",)
 """Required OAuth scope for any Vertex AI API call."""
 
