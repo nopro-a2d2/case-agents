@@ -1,20 +1,25 @@
 """LLM-backed binary classifier used by the rule modules.
 
 Calls the light guard model (default ``gemini-3.1-flash-lite-preview``) with
-a tightly-scoped prompt and parses the response as JSON
-``{"verdict": "pass"|"block", "reason": "..."}``.
+a tightly-scoped prompt and uses LangChain ``with_structured_output(...)`` to
+force a :class:`GuardrailVerdict` Pydantic response. The model API enforces
+the schema (Gemini native ``responseSchema`` / function-calling), eliminating
+the prose/code-fence brittleness of regex-based JSON extraction.
 
-**Fail-open**: any classifier error (timeout, parse failure, model exception)
-yields :data:`Verdict.PASS`. Availability over strict enforcement — a downed
-guard must never lock the agent.
+**Retry**: up to 3 retries (4 attempts total) on any exception
+(``ValidationError``, transient API errors, etc.).
+
+**Fail-open**: after retries are exhausted, any classifier failure yields
+:data:`Verdict.PASS`. Availability over strict enforcement — a downed guard
+must never lock the agent.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
 
 from .base import Decision, Verdict
 
@@ -25,39 +30,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_JSON_OBJ_RE = re.compile(r"\{.*?\}", re.DOTALL)
+MAX_ATTEMPTS = 4  # 1 initial + 3 retries
 
 
-def _coerce_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict):
-                t = block.get("text") or block.get("content")
-                if isinstance(t, str):
-                    parts.append(t)
-            elif isinstance(block, str):
-                parts.append(block)
-        return "".join(parts)
-    return str(content)
-
-
-def _parse_verdict(raw: str) -> tuple[Verdict, str]:
-    """Best-effort JSON extraction. Returns (verdict, reason)."""
-    m = _JSON_OBJ_RE.search(raw)
-    payload = m.group(0) if m else raw
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        norm = raw.strip().lower()
-        if norm.startswith("block"):
-            return Verdict.BLOCK, ""
-        return Verdict.PASS, ""
-    v = str(data.get("verdict", "")).strip().lower()
-    reason = str(data.get("reason", "")).strip()
-    return (Verdict.BLOCK if v == "block" else Verdict.PASS), reason
+class GuardrailVerdict(BaseModel):
+    verdict: Literal["pass", "block"]
+    reason: str = Field(default="", max_length=200)
 
 
 async def classify(
@@ -68,20 +46,39 @@ async def classify(
 ) -> tuple[Verdict, str]:
     """Run a single classification turn. Returns (verdict, reason).
 
-    On any exception, logs at WARNING level and returns ``(Verdict.PASS, "")``.
+    Retries up to 3 times on any exception. On exhaustion, logs at WARNING
+    level and returns ``(Verdict.PASS, "")``.
     """
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    try:
-        result = await model.ainvoke(
-            [SystemMessage(content=system), HumanMessage(content=user)]
-        )
-    except Exception as e:  # noqa: BLE001 — fail-open
-        logger.warning("guardrail classifier failed: %s: %s", type(e).__name__, e)
-        return Verdict.PASS, ""
+    bound = model.with_structured_output(GuardrailVerdict)
+    messages = [SystemMessage(content=system), HumanMessage(content=user)]
 
-    text = _coerce_text(getattr(result, "content", ""))
-    return _parse_verdict(text)
+    last_exc: Exception | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            result: GuardrailVerdict = await bound.ainvoke(messages)
+        except Exception as e:  # noqa: BLE001 — fail-open after retries
+            last_exc = e
+            logger.debug(
+                "guardrail classifier attempt %d/%d failed: %s: %s",
+                attempt,
+                MAX_ATTEMPTS,
+                type(e).__name__,
+                e,
+            )
+            continue
+
+        verdict = Verdict.BLOCK if result.verdict == "block" else Verdict.PASS
+        return verdict, result.reason
+
+    logger.warning(
+        "guardrail classifier failed after %d attempts: %s: %s",
+        MAX_ATTEMPTS,
+        type(last_exc).__name__ if last_exc else "Unknown",
+        last_exc,
+    )
+    return Verdict.PASS, ""
 
 
 def decision_from(
@@ -96,4 +93,4 @@ def decision_from(
     return Decision.passes(rule)
 
 
-__all__ = ["classify", "decision_from"]
+__all__ = ["GuardrailVerdict", "classify", "decision_from"]

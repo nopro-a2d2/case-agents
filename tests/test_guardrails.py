@@ -11,11 +11,13 @@ We exercise:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from pydantic import ValidationError
 
 from case_agent.guardrails import (
     Decision,
@@ -25,6 +27,7 @@ from case_agent.guardrails import (
     SystemDisclosureGuardrail,
     Verdict,
 )
+from case_agent.guardrails.classifier import GuardrailVerdict, classify
 from case_agent.loop.query import query
 from case_agent.loop.types import Done, TextDelta, TurnStart
 
@@ -32,31 +35,67 @@ from case_agent.loop.types import Done, TextDelta, TurnStart
 # ---------------------------------------------------------------- stubs
 
 
-class _StubLLM:
-    """Light stub for the LangChain BaseChatModel surface used by classify().
+class _BoundStub:
+    """Stand-in for ``model.with_structured_output(GuardrailVerdict)``.
 
-    Returns a single AIMessage with the canned text — supports both
-    ``ainvoke`` (used by classify()) and the loop's ``bind_tools().astream()``
-    surface (for the integration tests below).
+    ``ainvoke`` returns a canned :class:`GuardrailVerdict` instance, unless an
+    exception (or a sequence of exceptions for retry tests) is configured.
     """
 
     def __init__(
         self,
         *,
-        ainvoke_text: str | None = None,
-        ainvoke_exc: Exception | None = None,
+        result: GuardrailVerdict | None,
+        exc: Exception | None,
+        exc_sequence: list[Exception] | None,
+        invocations: list[list[BaseMessage]],
+    ):
+        self._result = result
+        self._exc = exc
+        self._exc_sequence = list(exc_sequence) if exc_sequence else None
+        self._invocations = invocations
+
+    async def ainvoke(self, messages, *args: Any, **kwargs: Any) -> GuardrailVerdict:  # noqa: ARG002
+        self._invocations.append(list(messages))
+        if self._exc_sequence:
+            exc = self._exc_sequence.pop(0)
+            raise exc
+        if self._exc is not None:
+            raise self._exc
+        if self._result is None:
+            return GuardrailVerdict(verdict="pass", reason="")
+        return self._result
+
+
+class _StubLLM:
+    """Light stub for the LangChain BaseChatModel surface used by classify().
+
+    Supports ``with_structured_output(schema).ainvoke(...)`` (used by
+    classify()) and the loop's ``bind_tools().astream()`` surface (for the
+    integration tests below).
+    """
+
+    def __init__(
+        self,
+        *,
+        structured_result: GuardrailVerdict | None = None,
+        structured_exc: Exception | None = None,
+        structured_exc_sequence: list[Exception] | None = None,
         stream_turns: Sequence[Sequence[AIMessageChunk]] = (),
     ):
-        self._text = ainvoke_text
-        self._exc = ainvoke_exc
+        self._structured_result = structured_result
+        self._structured_exc = structured_exc
+        self._structured_exc_sequence = structured_exc_sequence
         self._turns: list[list[AIMessageChunk]] = [list(t) for t in stream_turns]
         self.invocations: list[list[BaseMessage]] = []
 
-    async def ainvoke(self, messages, *args: Any, **kwargs: Any) -> AIMessage:  # noqa: ARG002
-        self.invocations.append(list(messages))
-        if self._exc is not None:
-            raise self._exc
-        return AIMessage(content=self._text or "")
+    def with_structured_output(self, _schema):  # noqa: ARG002
+        return _BoundStub(
+            result=self._structured_result,
+            exc=self._structured_exc,
+            exc_sequence=self._structured_exc_sequence,
+            invocations=self.invocations,
+        )
 
     def bind_tools(self, _tools):  # noqa: ARG002
         return self
@@ -149,7 +188,9 @@ async def test_manager_after_agent():
     ],
 )
 async def test_rule_blocks_on_block_verdict(rule_cls, user_text):
-    llm = _StubLLM(ainvoke_text='{"verdict":"block","reason":"hit"}')
+    llm = _StubLLM(
+        structured_result=GuardrailVerdict(verdict="block", reason="hit")
+    )
     rule = rule_cls(llm)
     decision = await rule.check_before([HumanMessage(user_text)], "sys")
     assert decision.verdict is Verdict.BLOCK
@@ -162,7 +203,9 @@ async def test_rule_blocks_on_block_verdict(rule_cls, user_text):
     [ModelIdentityGuardrail, PromptInjectionGuardrail, SystemDisclosureGuardrail],
 )
 async def test_rule_passes_on_pass_verdict(rule_cls):
-    llm = _StubLLM(ainvoke_text='{"verdict":"pass","reason":"ok"}')
+    llm = _StubLLM(
+        structured_result=GuardrailVerdict(verdict="pass", reason="ok")
+    )
     rule = rule_cls(llm)
     decision = await rule.check_before(
         [HumanMessage("이 사건 쟁점 요약해줘")], "sys"
@@ -176,7 +219,7 @@ async def test_rule_passes_on_pass_verdict(rule_cls):
     [ModelIdentityGuardrail, PromptInjectionGuardrail, SystemDisclosureGuardrail],
 )
 async def test_rule_fail_open_on_classifier_exception(rule_cls):
-    llm = _StubLLM(ainvoke_exc=RuntimeError("boom"))
+    llm = _StubLLM(structured_exc=RuntimeError("boom"))
     rule = rule_cls(llm)
     decision = await rule.check_before([HumanMessage("hi")], "sys")
     assert decision.verdict is Verdict.PASS  # availability over enforcement
@@ -186,7 +229,7 @@ async def test_rule_fail_open_on_classifier_exception(rule_cls):
 async def test_injection_after_is_noop():
     # PromptInjection only guards input — after is always PASS even on a
     # classifier that would otherwise BLOCK.
-    llm = _StubLLM(ainvoke_text='{"verdict":"block"}')
+    llm = _StubLLM(structured_result=GuardrailVerdict(verdict="block"))
     rule = PromptInjectionGuardrail(llm)
     decision = await rule.check_after(
         [HumanMessage("h"), AIMessage("a")], "final"
@@ -196,22 +239,48 @@ async def test_injection_after_is_noop():
 
 @pytest.mark.asyncio
 async def test_model_identity_after_blocks_on_leak():
-    llm = _StubLLM(ainvoke_text='{"verdict":"block","reason":"leak"}')
+    llm = _StubLLM(
+        structured_result=GuardrailVerdict(verdict="block", reason="leak")
+    )
     rule = ModelIdentityGuardrail(llm)
     decision = await rule.check_after([], "I am Claude Sonnet 4.6 by Anthropic.")
     assert decision.verdict is Verdict.BLOCK
 
 
+def _validation_error() -> ValidationError:
+    """Build a real ValidationError without depending on a private API."""
+    try:
+        GuardrailVerdict(verdict="invalid-value")  # type: ignore[arg-type]
+    except ValidationError as e:
+        return e
+    raise AssertionError("expected ValidationError")
+
+
 @pytest.mark.asyncio
-async def test_classifier_parses_json_embedded_in_prose():
-    # The light model may wrap JSON in chatty prose. classify() must still
-    # extract the verdict.
+async def test_classifier_retries_on_validation_error_then_succeeds():
+    """First 2 attempts raise ValidationError, 3rd attempt returns BLOCK."""
+    ve = _validation_error()
     llm = _StubLLM(
-        ainvoke_text='Sure! Here is the answer:\n{"verdict": "block", "reason":"nope"}\nDone.'
+        structured_result=GuardrailVerdict(verdict="block", reason="caught"),
+        structured_exc_sequence=[ve, ve],
     )
-    rule = ModelIdentityGuardrail(llm)
-    decision = await rule.check_before([HumanMessage("어떤 모델?")], "sys")
-    assert decision.verdict is Verdict.BLOCK
+    verdict, reason = await classify(llm, system="sys", user="payload")
+    assert verdict is Verdict.BLOCK
+    assert reason == "caught"
+    # 2 failed attempts + 1 successful = 3 ainvoke calls.
+    assert len(llm.invocations) == 3
+
+
+@pytest.mark.asyncio
+async def test_classifier_exhausts_retries_then_fail_open(caplog):
+    """4 consecutive failures must drop back to PASS with a WARN log."""
+    llm = _StubLLM(structured_exc=RuntimeError("transient"))
+    with caplog.at_level(logging.WARNING, logger="case_agent.guardrails.classifier"):
+        verdict, reason = await classify(llm, system="sys", user="payload")
+    assert verdict is Verdict.PASS
+    assert reason == ""
+    assert len(llm.invocations) == 4  # 1 initial + 3 retries
+    assert any("failed after 4 attempts" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------- Loop integration
@@ -333,6 +402,40 @@ async def test_no_guardrails_preserves_legacy_behaviour():
 
     done = [e for e in events if isinstance(e, Done)][-1]
     assert done.terminal.final_text == "hi"
+
+
+# ---------------------------------------------------------------- prompt invariants
+#
+# The classifier prompts are the actual policy surface: the rule classes just
+# forward verdicts. These tests pin the policy to "narrow to *this assistant*
+# (AiLex AI)" — general AI/framework concept questions must remain PASS.
+
+
+def test_model_identity_prompt_narrowed_to_self_reference():
+    from case_agent.guardrails.rules.model_identity import _PROMPT
+
+    # Scope is explicitly self-referential.
+    assert "this assistant" in _PROMPT.lower() or "본 어시스턴트" in _PROMPT
+    # PASS examples cover general AI concept + third-party AI case evidence.
+    assert "GPT-5" in _PROMPT or "ChatGPT" in _PROMPT
+    # Explicit third-party / general-knowledge carve-out present.
+    assert "third" in _PROMPT.lower() or "제3자" in _PROMPT or "일반" in _PROMPT
+
+
+def test_system_disclosure_prompt_narrowed_to_self_reference():
+    from case_agent.guardrails.rules.system_disclosure import _PROMPT
+
+    assert "this assistant" in _PROMPT.lower() or "본 어시스턴트" in _PROMPT
+    # General framework/agent concept questions must be in the PASS examples.
+    assert "LangChain" in _PROMPT
+    assert "일반" in _PROMPT or "general" in _PROMPT.lower()
+
+
+def test_injection_prompt_allows_quoted_analysis():
+    from case_agent.guardrails.rules.injection import _PROMPT
+
+    # The PASS section must allow analysing third-party AI prompts as evidence.
+    assert "analys" in _PROMPT.lower() or "분석" in _PROMPT
 
 
 # ---------------------------------------------------------------- sanity
