@@ -77,33 +77,34 @@ async def stream_query(
 
     input_messages = messages if messages is not None else initial_messages(prompt)
 
+    from ..observability import build_callbacks, langsmith_project_context
+
     # Auto-attach Langfuse callbacks unless caller passed an explicit list
     # (including an empty list to opt out).
     if callbacks is None:
-        from ..observability import build_callbacks
-
         callbacks = build_callbacks()
 
     metadata = _build_langfuse_metadata(session_id, user_id, tags)
     display_label_fn = build_label_fn(components.workspace)
     effective_guardrails = guardrails or getattr(components, "guardrails", None)
 
-    async for ev in query(
-        messages=input_messages,
-        system_prompt=system_prompt,
-        tools=components.tools,
-        model=components.model,
-        max_turns=max_turns,
-        abort=abort,
-        stream_timeout=stream_timeout,
-        todos_store=getattr(components, "todos_store", None),
-        callbacks=callbacks,
-        metadata=metadata,
-        system_extra=system_extra,
-        display_label_fn=display_label_fn,
-        guardrails=effective_guardrails,
-    ):
-        yield ev
+    with langsmith_project_context(session_id):
+        async for ev in query(
+            messages=input_messages,
+            system_prompt=system_prompt,
+            tools=components.tools,
+            model=components.model,
+            max_turns=max_turns,
+            abort=abort,
+            stream_timeout=stream_timeout,
+            todos_store=getattr(components, "todos_store", None),
+            callbacks=callbacks,
+            metadata=metadata,
+            system_extra=system_extra,
+            display_label_fn=display_label_fn,
+            guardrails=effective_guardrails,
+        ):
+            yield ev
 
 
 async def run_query_oneshot(
