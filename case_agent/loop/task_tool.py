@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.tools import BaseTool
 from pydantic import Field
 
-from .query import DEFAULT_MAX_TURNS, initial_messages, query
-from .types import Done, StreamEvent, Terminal
+from case_agent.loop.query import DEFAULT_MAX_TURNS, initial_messages, query
+from case_agent.loop.types import Done, StreamEvent, Terminal
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

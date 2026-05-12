@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import Command, CommandContext
+from case_agent.commands import Command, CommandContext
 
 if TYPE_CHECKING:
-    from ..loop.types import StreamEvent
+    from case_agent.loop.types import StreamEvent
 
 
 async def _handle(args: str, ctx: CommandContext) -> "list[StreamEvent]":
-    from ..loop.types import Cleared
+    from case_agent.loop.types import Cleared
 
     await ctx.abort()
     ctx.reset_history()

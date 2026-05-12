@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..prompts import EXPLORE_SYSTEM_PROMPT
-from ..tools.agent_tools import (
+from case_agent.prompts import EXPLORE_SYSTEM_PROMPT
+from case_agent.tools.agent_tools import (
     build_read_evidence_tool,
     build_smart_search_tool,
 )
@@ -18,8 +18,8 @@ from ..tools.agent_tools import (
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from ..tools.search import Embedder
-    from ..workspace import Workspace
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 def build_explore_subagent(

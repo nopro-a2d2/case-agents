@@ -42,7 +42,7 @@ def discover_skills(*roots: Path | str) -> dict[str, Skill]:
     Later roots override earlier ones on name collision (workspace beats
     bundled). Files with no ``name`` frontmatter are skipped silently.
     """
-    from .loader import iter_skill_files, parse_skill_md
+    from case_agent.skills.loader import iter_skill_files, parse_skill_md
 
     out: dict[str, Skill] = {}
     for root in roots:

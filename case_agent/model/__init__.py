@@ -1,4 +1,4 @@
-from .vertex import (
+from case_agent.model.vertex import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_HEAVY_MODEL,
     DEFAULT_LIGHT_MODEL,

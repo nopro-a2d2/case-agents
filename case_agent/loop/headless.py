@@ -18,10 +18,10 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from ..commands import CommandContext, try_dispatch
-from .runner import stream_query
-from .slash import build_skills_list_event, expand_slash
-from .types import (
+from case_agent.commands import CommandContext, try_dispatch
+from case_agent.loop.runner import stream_query
+from case_agent.loop.slash import build_skills_list_event, expand_slash
+from case_agent.loop.types import (
     Cleared,
     Done,
     SkillsList,
@@ -115,9 +115,9 @@ async def _connect_stdin() -> asyncio.StreamReader:
 
 async def headless_loop(case: str, root: str) -> None:
     """Run the agent loop in headless mode, bridging stdin/stdout."""
-    from ..agent import build_case_agent_components
-    from ..observability import flush as _obs_flush
-    from ..workspace import LocalFS
+    from case_agent.agent import build_case_agent_components
+    from case_agent.observability import flush as _obs_flush
+    from case_agent.workspace import LocalFS
 
     ws = LocalFS(case_id=case, root=root)
     components = build_case_agent_components(ws)

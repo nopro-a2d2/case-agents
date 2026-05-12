@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .types import SkillsList
+from case_agent.loop.types import SkillsList
 
 if TYPE_CHECKING:
-    from ..commands import Command, CommandHandler
-    from ..skills import Skill
+    from case_agent.commands import Command, CommandHandler
+    from case_agent.skills import Skill
 
 
 def build_skills_list_event(

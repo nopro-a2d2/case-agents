@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from .base import Decision, Guardrail, Verdict
+from case_agent.guardrails.base import Decision, Guardrail, Verdict
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage

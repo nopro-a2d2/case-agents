@@ -14,11 +14,10 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from ..briefs import BRIEF_KINDS
-from ..loop import brief_mode
-from ..workspace import Workspace
-from .todos import TodoStore
-
+from case_agent.briefs import BRIEF_KINDS
+from case_agent.loop import brief_mode
+from case_agent.tools.todos import TodoStore
+from case_agent.workspace import Workspace
 
 # ---------------------------------------------------------------------------
 # todo helpers

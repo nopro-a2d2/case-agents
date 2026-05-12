@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..briefs import BRIEF_KINDS
-from ._brief_planning_base import build_brief_planning_subagent_dict
+from case_agent.briefs import BRIEF_KINDS
+from case_agent.subagents._brief_planning_base import build_brief_planning_subagent_dict
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from ..tools.search import Embedder
-    from ..workspace import Workspace
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 _EXTRA = """\

@@ -22,8 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from ..workspace import Workspace
-
+from case_agent.workspace import Workspace
 
 MemoryType = Literal["user", "feedback", "project"]
 _VALID_TYPES: frozenset[str] = frozenset(("user", "feedback", "project"))

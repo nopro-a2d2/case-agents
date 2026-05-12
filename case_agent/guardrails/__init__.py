@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .base import Decision, Guardrail, Verdict
-from .manager import GuardrailManager
-from .rules import (
+from case_agent.guardrails.base import Decision, Guardrail, Verdict
+from case_agent.guardrails.manager import GuardrailManager
+from case_agent.guardrails.rules import (
     ModelIdentityGuardrail,
     PromptInjectionGuardrail,
     SystemDisclosureGuardrail,
@@ -43,7 +43,7 @@ def build_default_guardrails(
     ``max_output_tokens`` budget.
     """
     if model is None:
-        from ..model import build_light
+        from case_agent.model import build_light
 
         model = build_light(
             model=DEFAULT_GUARD_MODEL,

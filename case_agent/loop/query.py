@@ -37,7 +37,7 @@ try:
 except ImportError:  # pragma: no cover — minimal test env
     _ChatAnthropicVertex = None  # type: ignore[assignment]
 
-from .types import (
+from case_agent.loop.types import (
     Done,
     StreamEvent,
     SubagentTextDelta,
@@ -57,8 +57,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
 
-    from ..guardrails import GuardrailManager
-    from ..tools.todos import TodoStore
+    from case_agent.guardrails import GuardrailManager
+    from case_agent.tools.todos import TodoStore
 
 
 DEFAULT_MAX_TURNS = 25
@@ -159,7 +159,7 @@ async def query(
 
     # Before-agent guardrails — run once on the entry prompt.
     if guardrails is not None:
-        from ..guardrails import Verdict as _Verdict
+        from case_agent.guardrails import Verdict as _Verdict
 
         decision = await guardrails.before_agent(messages, system_prompt)
         if decision.verdict is _Verdict.BLOCK:
@@ -236,7 +236,7 @@ async def query(
         if not assistant_msg.tool_calls:
             final_text = coerce_text(assistant_msg.content)
             if guardrails is not None:
-                from ..guardrails import Verdict as _Verdict
+                from case_agent.guardrails import Verdict as _Verdict
 
                 decision = await guardrails.after_agent(state[1:], final_text)
                 if decision.verdict is _Verdict.BLOCK:

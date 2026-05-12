@@ -20,9 +20,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from ..briefs import BRIEF_KINDS
-from ..workspace import Workspace
-
+from case_agent.briefs import BRIEF_KINDS
+from case_agent.workspace import Workspace
 
 # Tool name → Korean verb prefix.
 _ACTION_BY_TOOL: dict[str, str] = {

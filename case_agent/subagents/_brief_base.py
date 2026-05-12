@@ -14,15 +14,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..briefs import BriefKind, briefs_output_path
-from ..tools.agent_tools import build_case_tools
-from ..tools.memory import build_memory_tools
+from case_agent.briefs import BriefKind, briefs_output_path
+from case_agent.tools.agent_tools import build_case_tools
+from case_agent.tools.memory import build_memory_tools
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from ..tools.search import Embedder
-    from ..workspace import Workspace
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 _BASE_PROMPT = """\

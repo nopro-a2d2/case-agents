@@ -16,14 +16,14 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from ..workspace import Workspace
-from .calculate import CalculateTool
-from .citation import list_evidence as _list_evidence, read_evidence as _read_evidence
-from .search import Embedder, smart_search as _smart_search
-from .verify import (
-    check_completeness as _check_completeness,
-    verify_citations as _verify_citations,
-)
+from case_agent.tools.calculate import CalculateTool
+from case_agent.tools.citation import list_evidence as _list_evidence
+from case_agent.tools.citation import read_evidence as _read_evidence
+from case_agent.tools.search import Embedder
+from case_agent.tools.search import smart_search as _smart_search
+from case_agent.tools.verify import check_completeness as _check_completeness
+from case_agent.tools.verify import verify_citations as _verify_citations
+from case_agent.workspace import Workspace
 
 
 def build_smart_search_tool(workspace: Workspace, embedder: Embedder):

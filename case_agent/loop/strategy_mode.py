@@ -15,8 +15,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 
-from ..workspace import Workspace
-
+from case_agent.workspace import Workspace
 
 STATE_FILE = "state/strategy.json"
 PLANS_DIR = "plans"

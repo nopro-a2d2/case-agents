@@ -22,7 +22,7 @@ from typing import Any
 
 import frontmatter
 
-from . import Skill
+from case_agent.skills import Skill
 
 DESCRIPTION_MAX = 1024
 

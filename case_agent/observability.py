@@ -28,7 +28,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from ._env import load_env
+from case_agent._env import load_env
 
 if TYPE_CHECKING:
     from langfuse import Langfuse

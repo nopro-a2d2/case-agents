@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
-from .base import Decision, Verdict
+from case_agent.guardrails.base import Decision, Verdict
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

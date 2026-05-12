@@ -28,8 +28,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from ..workspace import Workspace
-
+from case_agent.workspace import Workspace
 
 # ---------------------------------------------------------------------------
 # Citation parsing

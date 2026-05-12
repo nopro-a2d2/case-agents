@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import Skill
+from case_agent.skills import Skill
 
 _HEADER = """## Available skills
 

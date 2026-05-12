@@ -16,13 +16,11 @@ from typing import Any, Literal
 
 from langchain_core.tools import tool
 
-from ..memory.memdir import (
-    MemoryEntry,
-    read_memory as _read_memory,
-    read_memory_index as _read_memory_index,
-    write_memory as _write_memory,
-)
-from ..workspace import Workspace
+from case_agent.memory.memdir import MemoryEntry
+from case_agent.memory.memdir import read_memory as _read_memory
+from case_agent.memory.memdir import read_memory_index as _read_memory_index
+from case_agent.memory.memdir import write_memory as _write_memory
+from case_agent.workspace import Workspace
 
 
 def build_read_memory_index_tool(workspace: Workspace):

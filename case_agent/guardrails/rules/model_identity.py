@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..base import Decision
-from ..classifier import classify, decision_from
+from case_agent.guardrails.base import Decision
+from case_agent.guardrails.classifier import classify, decision_from
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

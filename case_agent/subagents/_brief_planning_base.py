@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..briefs import BriefKind
-from ..tools.agent_tools import (
+from case_agent.briefs import BriefKind
+from case_agent.tools.agent_tools import (
     build_list_evidence_tool,
     build_read_evidence_tool,
     build_smart_search_tool,
@@ -33,8 +33,8 @@ from ..tools.agent_tools import (
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from ..tools.search import Embedder
-    from ..workspace import Workspace
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 _BASE_PROMPT = """\

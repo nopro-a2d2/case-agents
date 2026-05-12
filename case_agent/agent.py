@@ -11,23 +11,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .commands import Command, CommandHandler, discover_commands
-from .model import VertexEmbedderAdapter, build_embedder, build_heavy, build_light
-from .prompts import MAIN_SYSTEM_PROMPT
-from .skills import Skill, discover_skills
-from .loop.task_tool import build_task_tool, build_task_tool_for_subagent
-from .skills.prompt import build_skill_listing
-from .subagents import discover_subagents
-from .tools import TodoStore, build_all_tools
-from .workspace import LocalFS
+from case_agent.commands import Command, CommandHandler, discover_commands
+from case_agent.loop.task_tool import build_task_tool, build_task_tool_for_subagent
+from case_agent.model import (
+    VertexEmbedderAdapter,
+    build_embedder,
+    build_heavy,
+    build_light,
+)
+from case_agent.prompts import MAIN_SYSTEM_PROMPT
+from case_agent.skills import Skill, discover_skills
+from case_agent.skills.prompt import build_skill_listing
+from case_agent.subagents import discover_subagents
+from case_agent.tools import TodoStore, build_all_tools
+from case_agent.workspace import LocalFS
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
 
-    from .guardrails import GuardrailManager
-    from .tools.search import Embedder
-    from .workspace import Workspace
+    from case_agent.guardrails import GuardrailManager
+    from case_agent.tools.search import Embedder
+    from case_agent.workspace import Workspace
 
 
 _BUNDLED_SKILLS_DIR = Path(__file__).parent / "skills" / "bundled"
@@ -114,7 +119,7 @@ def build_case_agent_components(
 
     effective_guardrails = guardrails
     if effective_guardrails is None and enable_guardrails:
-        from .guardrails import build_default_guardrails
+        from case_agent.guardrails import build_default_guardrails
 
         effective_guardrails = build_default_guardrails()
 
