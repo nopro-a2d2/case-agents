@@ -35,7 +35,7 @@ MAX_ATTEMPTS = 4  # 1 initial + 3 retries
 
 class GuardrailVerdict(BaseModel):
     verdict: Literal["pass", "block"]
-    reason: str = Field(default="", max_length=200)
+    reason: str = Field(default="")
 
 
 async def classify(
